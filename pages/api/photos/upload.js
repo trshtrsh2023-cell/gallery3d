@@ -3,7 +3,11 @@ import formidable from 'formidable';
 import fs from 'fs';
 import path from 'path';
 
-export const config = { api: { bodyParser: false } };
+export const config = {
+  api: {
+    bodyParser: false, // تعطيل المعالج التلقائي للسماح برفع الصور
+  },
+};
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -36,7 +40,7 @@ export default async function handler(req, res) {
       .getPublicUrl(fileName);
 
     const { data, error: dbErr } = await sb
-      .from('photos')
+      .from('gallery-images')
       .insert({ title, subtitle, image_url: urlData.publicUrl, position_index: posIdx })
       .select()
       .single();
