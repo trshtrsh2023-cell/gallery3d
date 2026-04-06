@@ -4,7 +4,7 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).end();
 
   const { data, error } = await supabase
-    .from('gallery-images')
+    .from('photos') // التغيير هنا: يجب أن يكون photos
     .select('*')
     .order('position_index', { ascending: true })
     .order('created_at', { ascending: true });
