@@ -5,10 +5,19 @@ export default async function handler(req, res) {
 
   const { username, password } = req.body;
 
-  if (
-    username === process.env.ADMIN_USERNAME &&
-    password === process.env.ADMIN_PASSWORD
-  ) {
+  // تعريف الحساب الأول من متغيرات البيئة
+  const admin1 = process.env.ADMIN_USERNAME;
+  const pass1 = process.env.ADMIN_PASSWORD;
+
+  // تعريف الحساب الثاني من متغيرات البيئة (التي ستضيفها في Vercel)
+  const admin2 = process.env.ADMIN_USERNAME_2;
+  const pass2 = process.env.ADMIN_PASSWORD_2;
+
+  // التحقق مما إذا كانت البيانات تطابق الحساب الأول أو الحساب الثاني
+  const isFirstAdmin = username === admin1 && password === pass1;
+  const isSecondAdmin = admin2 && pass2 && username === admin2 && password === pass2;
+
+  if (isFirstAdmin || isSecondAdmin) {
     const token = await signToken({ role: 'admin', username });
     setAuthCookie(res, token);
     return res.status(200).json({ ok: true });
