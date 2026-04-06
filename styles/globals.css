@@ -1,8 +1,8 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --cream:  #faf8f4;
-  --sand:   #f0ebe0;
+  --cream:  #0f0f0d;
+  --sand:   #362a0f;
   --coral:  #ff6b6b;
   --teal:   #4ecdc4;
   --purple: #a78bfa;
@@ -10,7 +10,7 @@
   --blue:   #60a5fa;
   --green:  #34d399;
   --text:   #1a1a2e;
-  --muted:  #6b7280;
+  --muted:  #1a1a1b;
 }
 
 body {
