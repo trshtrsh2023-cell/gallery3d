@@ -36,8 +36,9 @@ export default async function handler(req, res) {
       .getPublicUrl(fileName);
 
 // ... الكود السابق حتى سطر الإدخال ...
+// ... داخل دالة form.parse ...
 const { data, error: dbErr } = await sb
-  .from('photos') // تم التعديل هنا أيضاً
+  .from('photos') // يجب أن يكون 'photos' ليطابق اسم الجدول في Supabase
   .insert({ title, subtitle, image_url: urlData.publicUrl, position_index: posIdx })
   .select()
   .single();
