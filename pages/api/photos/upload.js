@@ -36,16 +36,11 @@ export default async function handler(req, res) {
       .getPublicUrl(fileName);
 
 // ... الكود السابق حتى سطر الإدخال ...
-    const { data, error: dbErr } = await sb
-      .from('photos') // التغيير هنا: استخدم photos بدلاً من gallery-images
-      .insert({ 
-        title, 
-        subtitle, 
-        image_url: urlData.publicUrl, 
-        position_index: posIdx 
-      })
-      .select()
-      .single();
+const { data, error: dbErr } = await sb
+  .from('photos') // تم التعديل هنا أيضاً
+  .insert({ title, subtitle, image_url: urlData.publicUrl, position_index: posIdx })
+  .select()
+  .single();
 // ... باقي الكود ...
 
     if (dbErr) return res.status(500).json({ error: dbErr.message });
