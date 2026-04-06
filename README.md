@@ -14,11 +14,7 @@
    - Project URL (Settings > API > Project URL)
    - anon/public key (Settings > API > Project API keys)
    - service_role key (Settings > API > Project API keys)
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5dmFmb2Fmb3hmaXNrZnJkYWd6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MTcwNzUsImV4cCI6MjA5MDk5MzA3NX0.TvF58xAO4pfb613IoIBZTO1-q9Cxgl4878QnkVqr_AU
 
-https://vyvafoafoxfiskfrdagz.supabase.co
-
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5dmFmb2Fmb3hmaXNrZnJkYWd6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTQxNzA3NSwiZXhwIjoyMDkwOTkzMDc1fQ.Xz1y-9Y3kxOJhE9YCCbTR62O5Em0dLJ0V4UJn-G8XEc
 ---
 
 ### 2️⃣ رفع الكود على GitHub
@@ -27,7 +23,7 @@ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5dmFmb2F
 git init
 git add .
 git commit -m "Initial commit"
-git remote add origin https://github.com/trshtrsh2023-cell/gallery3d.git
+git remote add origin https://github.com/username/gallery3d.git
 git push -u origin main
 ```
 
