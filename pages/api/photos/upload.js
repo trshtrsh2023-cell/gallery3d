@@ -35,14 +35,11 @@ export default async function handler(req, res) {
       .from('gallery-images')
       .getPublicUrl(fileName);
 
-// ... الكود السابق حتى سطر الإدخال ...
-// ... داخل دالة form.parse ...
-const { data, error: dbErr } = await sb
-  .from('photos') // يجب أن يكون 'photos' ليطابق اسم الجدول في Supabase
-  .insert({ title, subtitle, image_url: urlData.publicUrl, position_index: posIdx })
-  .select()
-  .single();
-// ... باقي الكود ...
+    const { data, error: dbErr } = await sb
+      .from('photos')
+      .insert({ title, subtitle, image_url: urlData.publicUrl, position_index: posIdx })
+      .select()
+      .single();
 
     if (dbErr) return res.status(500).json({ error: dbErr.message });
     return res.status(201).json(data);
