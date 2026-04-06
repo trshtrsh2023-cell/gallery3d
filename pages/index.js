@@ -20,8 +20,10 @@ const SLOTS = [
 ];
 
 const FRAME_COLORS = [
-  0x111111, 0x222222, 0x050505, 0x1a1a1a, // تم تغيير ألوان الإطارات لتناسب الجو السينمائي
-  0x0a0a0a, 0x333333, 0x111111, 0x000000,
+  0x3b82f6,0xef4444,0x10b981,0xf59e0b,
+  0x8b5cf6,0xec4899,0x06b6d4,0x84cc16,
+  0xf97316,0x6366f1,0x14b8a6,0xe11d48,
+  0x7c3aed,0x0284c7,0xd97706,
 ];
 
 export default function Gallery() {
@@ -54,9 +56,9 @@ export default function Gallery() {
     const init = async () => {
       THREE = await import('three');
       scene = new THREE.Scene();
-      // تعديل: خلفية داكنة وضباب كثيف للجو السينمائي
-      scene.background = new THREE.Color(0x020202); 
-      scene.fog = new THREE.FogExp2(0x020202, 0.05);
+      // تم التعديل: خلفية فاتحة قليلاً لضمان الرؤية
+      scene.background = new THREE.Color(0x111112); 
+      scene.fog = new THREE.FogExp2(0x111112, 0.02);
 
       camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 100);
       camera.position.set(0,1.7,13);
@@ -67,7 +69,7 @@ export default function Gallery() {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.1;
+      renderer.toneMappingExposure = 1.3;
       mountRef.current?.appendChild(renderer.domElement);
 
       buildRoom(THREE);
@@ -86,18 +88,13 @@ export default function Gallery() {
         scene.add(mesh); return mesh;
       };
 
-      // تعديل الجدران لتصبح داكنة وفخمة
-      const wallM=m(0x1a1a1c, 0.9, 0.1);
+      const wallM=m(0x2a2a2c); // جدران رمادية داكنة (ليست سوداء)
       
-      // تعديل الأرضية لتصبح رخام أسود عاكس
-      const floorMat = new T.MeshStandardMaterial({ 
-        color: 0x050505, 
-        roughness: 0.15, 
-        metalness: 0.6 
-      });
+      // أرضية رخامية بلمعة خفيفة (تسمح بالرؤية)
+      const floorM = new T.MeshStandardMaterial({ color:0x151518, roughness:0.25, metalness:0.4 });
       
-      box(RW,0.22,RL,floorMat,0,-0.11,0); 
-      box(RW,0.12,RL,m(0x0a0a0a,0.98),0,RH,0); // السقف داكن
+      box(RW,0.22,RL,floorM,0,-0.11,0);
+      box(RW,0.12,RL,m(0x1a1a1c,0.98),0,RH,0);
       
       box(0.25,RH,RL,wallM,-RW/2,RH/2,0);
       box(0.25,RH,RL,wallM, RW/2,RH/2,0);
@@ -108,12 +105,12 @@ export default function Gallery() {
       box(0.25,RH,7,wallM,-5.5,RH/2, 6);
       box(0.25,RH,7,wallM, 5.5,RH/2, 6);
 
-      // تعديل إضاءة الغرفة لتكون خافتة جداً (Low Key Lighting)
-      scene.add(new T.AmbientLight(0xffffff, 0.08));
-      scene.add(new T.HemisphereLight(0x444444, 0x000000, 0.2));
+      // رفع الإضاءة العامة لرؤية المعرض بوضوح
+      scene.add(new T.AmbientLight(0xffffff, 0.45));
+      scene.add(new T.HemisphereLight(0xffffff, 0x000000, 0.35));
 
       const railM=m(0x181820,0.15,0.95), coneM=m(0x101018,0.1,0.97);
-      const glowM=new T.MeshStandardMaterial({color:0xfffce8,emissive:0xfffce8,emissiveIntensity:2.0,roughness:0,metalness:0});
+      const glowM=new T.MeshStandardMaterial({color:0xfffce8,emissive:0xfffce8,emissiveIntensity:1.2,roughness:0,metalness:0});
 
       [-7,0,7].forEach(rx=>{
         const rail=new T.Mesh(new T.BoxGeometry(0.046,0.036,RL-1),railM);
@@ -128,16 +125,14 @@ export default function Gallery() {
           lens.rotation.x=Math.PI/2; lens.position.y=-0.432; g.add(lens);
           scene.add(g);
           
-          // سبوت لايت موجه للأرضية لإظهار الانعكاسات
-          const spot=new T.SpotLight(0xfff8e0, 2.5, 15, Math.PI/8, 0.3, 1.2);
+          const spot=new T.SpotLight(0xfff8e0, 2, 18, Math.PI/6, 0.3, 1);
           spot.position.set(rx,RH-0.44,rz);
           spot.target.position.set(rx,0,rz);
           spot.castShadow=true; scene.add(spot); scene.add(spot.target);
         });
       });
 
-      // المقاعد (Benches)
-      const seatM=m(0x1a1a1a,0.4,0.8), legM=m(0x050505,0.1,0.9);
+      const seatM=m(0x1a1a1a,0.62,0.05), legM=m(0x101010,0.2,0.88);
       [[0,0],[0,-12],[0,12],[-8,0],[8,0]].forEach(([bx,bz])=>{
         const g=new T.Group(); g.position.set(bx,0,bz);
         const seat=new T.Mesh(new T.BoxGeometry(1.9,0.09,0.55),seatM);
@@ -157,7 +152,7 @@ export default function Gallery() {
     };
 
     const makeFrameGeo=(T,fw,fh)=>{
-      const bw=0.15; // زيادة سمك الإطار قليلاً للفخامة
+      const bw=0.13;
       const shape=new T.Shape();
       shape.moveTo(-(fw/2+bw),-(fh/2+bw)); shape.lineTo((fw/2+bw),-(fh/2+bw));
       shape.lineTo((fw/2+bw),(fh/2+bw));   shape.lineTo(-(fw/2+bw),(fh/2+bw));
@@ -166,29 +161,27 @@ export default function Gallery() {
       hole.moveTo(-fw/2,-fh/2); hole.lineTo(fw/2,-fh/2);
       hole.lineTo(fw/2,fh/2);   hole.lineTo(-fw/2,fh/2);
       hole.closePath(); shape.holes.push(hole);
-      return new T.ExtrudeGeometry(shape,{depth:0.12,bevelEnabled:true,bevelSize:0.02,bevelThickness:0.02});
+      return new T.ExtrudeGeometry(shape,{depth:0.09,bevelEnabled:true,bevelSize:0.014,bevelThickness:0.014,bevelSegments:3});
     };
 
     const buildSlot=(T,slot,ph,hits)=>new Promise(resolve=>{
       const group=new T.Group();
       group.position.set(...slot.pos);
       group.rotation.y=slot.rotY;
-      
-      // إطارات معدنية داكنة
-      const fMat=new T.MeshStandardMaterial({color:0x0a0a0a,roughness:0.1,metalness:0.9});
+      const fColor=FRAME_COLORS[slot.id%FRAME_COLORS.length];
+      const fMat=new T.MeshStandardMaterial({color:fColor,roughness:0.18,metalness:0.7});
 
       const finalize=(fw,fh,tex,hasPhoto)=>{
         const frameMesh=new T.Mesh(makeFrameGeo(T,fw,fh),fMat);
-        frameMesh.position.z=-0.04; frameMesh.castShadow=true; group.add(frameMesh);
-        
+        frameMesh.position.z=-0.035; frameMesh.castShadow=true; group.add(frameMesh);
+        const back=new T.Mesh(new T.BoxGeometry(fw,fh,0.015),
+          new T.MeshStandardMaterial({color:0xfaf7f3,roughness:0.9}));
+        back.position.z=0.02; group.add(back);
         const imgMesh=new T.Mesh(new T.PlaneGeometry(fw,fh),
-          new T.MeshStandardMaterial({map:tex,roughness:0.2, metalness:0.1}));
-        imgMesh.position.z=0.04; group.add(imgMesh);
-        
-        // تعديل: إضافة إضاءة سبوت لايت سينمائية لكل صورة
+          new T.MeshStandardMaterial({map:tex,roughness:0.82, emissive: 0xffffff, emissiveIntensity: 0.1}));
+        imgMesh.position.z=0.036; group.add(imgMesh);
         addPicLight(T,group,fw,fh,hasPhoto);
         addLabel(T,group,slot.id,fw,fh,hasPhoto);
-        
         group.userData={title:ph?.title||'',sub:ph?.subtitle||'',hasPhoto};
         if(hasPhoto) hits.push(group);
         scene.add(group); resolve();
@@ -198,7 +191,7 @@ export default function Gallery() {
         const img=new Image(); img.crossOrigin='anonymous';
         img.onload=()=>{
           const asp=img.naturalWidth/img.naturalHeight;
-          const mH=2.0,mW=2.8; // تكبير الصور قليلاً
+          const mH=1.9,mW=2.6;
           let fw,fh;
           if(asp>=1){fw=Math.min(mW,asp*mH);fh=fw/asp;}
           else{fh=mH;fw=fh*asp;}
@@ -215,42 +208,42 @@ export default function Gallery() {
     const makePlaceholder=(T,slotId)=>{
       const cv=document.createElement('canvas'); cv.width=360; cv.height=270;
       const ctx=cv.getContext('2d');
-      ctx.fillStyle='#111'; ctx.fillRect(0,0,360,270);
-      ctx.strokeStyle='#333'; ctx.lineWidth=2; ctx.strokeRect(20,20,320,230);
-      ctx.fillStyle='#444'; ctx.font='bold 60px sans-serif'; ctx.textAlign='center';
-      ctx.fillText(slotId.toString(),180,150);
+      ctx.fillStyle='#f0ece6'; ctx.fillRect(0,0,360,270);
+      ctx.strokeStyle='#d4cec6'; ctx.lineWidth=1.5; ctx.setLineDash([8,6]);
+      ctx.strokeRect(16,16,328,238);
+      ctx.fillStyle='#b8b0a8'; ctx.font='bold 54px sans-serif'; ctx.textAlign='center';
+      ctx.fillText(slotId.toString(),180,155);
       return new T.CanvasTexture(cv);
     };
 
     const addPicLight=(T,group,fw,fh,lit)=>{
       if(!lit) return;
-      // إضافة كشاف "سبوت لايت" احترافي فوق كل لوحة
-      const spot = new T.SpotLight(0xfff5d0, 6, 8, Math.PI/7, 0.4, 1.8);
-      spot.position.set(0, fh/2 + 1.2, 1.8);
-      spot.target.position.set(0, 0, 0);
-      spot.castShadow = true;
-      group.add(spot);
-      group.add(spot.target);
-      
-      // تصميم شكل الكشاف الفيزيائي
-      const brassM=new T.MeshStandardMaterial({color:0x222222,roughness:0.1,metalness:0.9});
-      const g=new T.Group(); g.position.set(0,fh/2+0.2,0.2);
-      const arm=new T.Mesh(new T.CylinderGeometry(0.015,0.015,0.3,8),brassM);
-      arm.rotation.x=Math.PI/2; g.add(arm);
+      const brassM=new T.MeshStandardMaterial({color:0xc4a040,roughness:0.16,metalness:0.9});
+      const shadeM=new T.MeshStandardMaterial({color:0x0e0e18,roughness:0.15,metalness:0.95});
+      const g=new T.Group(); g.position.set(0,fh/2+0.195,0.16);
+      g.add(new T.Mesh(new T.BoxGeometry(fw*0.46,0.05,0.04),brassM));
+      const arm=new T.Mesh(new T.CylinderGeometry(0.01,0.01,0.16,8),brassM);
+      arm.rotation.x=Math.PI/2; arm.position.z=0.08; g.add(arm);
+      const shade=new T.Mesh(new T.CylinderGeometry(0.045,0.076,fw*0.42,16,1,true,0,Math.PI),shadeM);
+      shade.rotation.x=-Math.PI/2; shade.position.z=0.16; g.add(shade);
       group.add(g);
+      
+      const pl=new T.SpotLight(0xfff8cc, 5.5, 7, Math.PI/7, 0.4, 2);
+      pl.position.set(0,fh/2+1, 1.5);
+      pl.target.position.set(0, 0, 0);
+      group.add(pl); group.add(pl.target);
     };
 
     const addLabel=(T,group,slotId,fw,fh,hasPhoto)=>{
       if(!hasPhoto) return;
-      const cv=document.createElement('canvas'); cv.width=160; cv.height=60;
+      const cv=document.createElement('canvas'); cv.width=140; cv.height=52;
       const ctx=cv.getContext('2d');
-      ctx.fillStyle='rgba(0,0,0,0.8)'; ctx.fillRect(0,0,160,60);
-      ctx.fillStyle='#fff'; ctx.font='bold 24px sans-serif'; ctx.textAlign='center';
-      ctx.fillText('#'+slotId,80,40);
-      const tex=new T.CanvasTexture(cv);
-      const sprite=new T.Mesh(new T.PlaneGeometry(0.4,0.15),
-        new T.MeshStandardMaterial({map:tex,transparent:true,depthWrite:false}));
-      sprite.position.set(fw/2+0.3, -fh/2, 0.1); group.add(sprite);
+      ctx.fillStyle='rgba(26,26,46,0.8)'; ctx.beginPath(); ctx.roundRect(0,0,140,52,9); ctx.fill();
+      ctx.fillStyle='#ffffff'; ctx.font='bold 28px sans-serif'; ctx.textAlign='center';
+      ctx.fillText('#'+slotId,70,36);
+      const sprite=new T.Mesh(new T.PlaneGeometry(0.44,0.165),
+        new T.MeshStandardMaterial({map:new T.CanvasTexture(cv),transparent:true,depthWrite:false}));
+      sprite.position.set(0,fh/2+0.55,0.08); group.add(sprite);
     };
 
     const setupControls = (rdr) => {
@@ -258,22 +251,19 @@ export default function Gallery() {
       document.addEventListener('keyup',   e=>{ s.keys[e.code]=false; });
       rdr.domElement.addEventListener('click', ()=>{ if(!isMobile) rdr.domElement.requestPointerLock(); });
       document.addEventListener('pointerlockchange',()=>{
-        s.isLocked = document.pointerLockElement===rdr.domElement;
-        setLocked(s.isLocked);
+        s.isLocked = document.pointerLockElement===rdr.domElement; setLocked(s.isLocked);
       });
       document.addEventListener('mousemove', e=>{
         if(!s.isLocked) return;
-        s.yaw   -= e.movementX*0.0018;
-        s.pitch -= e.movementY*0.0018;
+        s.yaw   -= e.movementX*0.0018; s.pitch -= e.movementY*0.0018;
         s.pitch  = Math.max(-1.1,Math.min(1.1,s.pitch));
       });
 
       rdr.domElement.addEventListener('touchstart', e=>{
         e.preventDefault();
         for(const t of e.changedTouches){
-          if(t.clientX > innerWidth/2 && !s.lookTouch.active){
+          if(t.clientX > innerWidth/2 && !s.lookTouch.active)
             s.lookTouch={ active:true, id:t.identifier, lastX:t.clientX, lastY:t.clientY };
-          }
         }
       },{passive:false});
 
@@ -281,11 +271,8 @@ export default function Gallery() {
         e.preventDefault();
         for(const t of e.changedTouches){
           if(t.identifier===s.lookTouch.id){
-            const dx=t.clientX-s.lookTouch.lastX;
-            const dy=t.clientY-s.lookTouch.lastY;
-            s.yaw   -= dx*0.004;
-            s.pitch -= dy*0.004;
-            s.pitch  = Math.max(-1.1,Math.min(1.1,s.pitch));
+            const dx=t.clientX-s.lookTouch.lastX; const dy=t.clientY-s.lookTouch.lastY;
+            s.yaw -= dx*0.004; s.pitch -= dy*0.004; s.pitch = Math.max(-1.1,Math.min(1.1,s.pitch));
             s.lookTouch.lastX=t.clientX; s.lookTouch.lastY=t.clientY;
           }
         }
@@ -323,16 +310,13 @@ export default function Gallery() {
           cam.position.x=Math.max(-10.4,Math.min(10.4,cam.position.x));
           cam.position.z=Math.max(-16.4,Math.min(16.4,cam.position.z));
           cam.position.y=1.7;
-          cam.rotation.order='YXZ';
-          cam.rotation.y=s.yaw; cam.rotation.x=s.pitch;
+          cam.rotation.order='YXZ'; cam.rotation.y=s.yaw; cam.rotation.x=s.pitch;
 
           raycaster.setFromCamera({x:0,y:0},cam);
           const hitArr=raycaster.intersectObjects(hits,true);
           if(hitArr.length&&hitArr[0].distance<5.5){
-            let obj=hitArr[0].object;
-            while(obj&&!obj.userData?.hasPhoto) obj=obj.parent;
-            if(obj?.userData?.hasPhoto) setPhotoInfo(obj.userData);
-            else setPhotoInfo(null);
+            let obj=hitArr[0].object; while(obj&&!obj.userData?.hasPhoto) obj=obj.parent;
+            if(obj?.userData?.hasPhoto) setPhotoInfo(obj.userData); else setPhotoInfo(null);
           } else setPhotoInfo(null);
         }
         rdr.render(sc,cam);
@@ -340,16 +324,10 @@ export default function Gallery() {
       loop();
     };
 
-    window.addEventListener('resize',()=>{
-      camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
-      renderer.setSize(innerWidth,innerHeight);
-    });
-
     init();
     return ()=>{ cancelAnimationFrame(animId); renderer?.dispose(); };
   },[entered,photos]);
 
-  // JOYSTICK HANDLERS (ابقيتهم كما هم تماماً لضمان عمل الجوال)
   const onJoyStart = useCallback(e=>{
     e.preventDefault(); const t=e.changedTouches[0];
     const zone=joystickZoneRef.current?.getBoundingClientRect();
@@ -381,15 +359,15 @@ export default function Gallery() {
   return(
     <>
       <Head>
-        <title>المعرض السينمائي الفاخر</title>
+        <title>معرض الفوتوغرافيا الافتراضي</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
       </Head>
       <div ref={mountRef} style={{width:'100vw',height:'100dvh',background:'#000'}}/>
 
       {!entered&&(
-        <div style={{position:'fixed',inset:0,zIndex:200,background:'#050505',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',fontFamily:'sans-serif'}}>
+        <div style={{position:'fixed',inset:0,zIndex:200,background:'#0a0a0c',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',fontFamily:'sans-serif'}}>
           <h1 style={{color:'#fff',letterSpacing:'0.4em',fontWeight:100,fontSize:'3rem'}}>GALLERY</h1>
-          <button onClick={()=>setEntered(true)} style={{background:'none',border:'1px solid #444',color:'#aaa',padding:'12px 40px',cursor:'pointer',marginTop:'30px',borderRadius:'4px'}}>دخول التجربة</button>
+          <button onClick={()=>setEntered(true)} style={{background:'none',border:'1px solid #444',color:'#aaa',padding:'12px 40px',cursor:'pointer',marginTop:'30px',borderRadius:'4px'}}>دخول المعرض →</button>
         </div>
       )}
 
