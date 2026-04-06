@@ -3,11 +3,7 @@ import formidable from 'formidable';
 import fs from 'fs';
 import path from 'path';
 
-export const config = {
-  api: {
-    bodyParser: false, // تعطيل المعالج التلقائي للسماح برفع الصور
-  },
-};
+export const config = { api: { bodyParser: false } };
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
