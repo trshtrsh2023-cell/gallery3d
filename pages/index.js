@@ -56,9 +56,9 @@ export default function Gallery() {
     const init = async () => {
       THREE = await import('three');
       scene = new THREE.Scene();
-      // تعديل: خلفية فاتحة لضمان الرؤية الكاملة
-      scene.background = new THREE.Color(0x222225); 
-      scene.fog = new THREE.FogExp2(0x222225, 0.005);
+      // تصميم سينمائي: خلفية سوداء مخملية + ضباب كثيف
+      scene.background = new THREE.Color(0x050510);
+      scene.fog = new THREE.FogExp2(0x050510, 0.012);
 
       camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 100);
       camera.position.set(0,1.7,13);
@@ -69,7 +69,7 @@ export default function Gallery() {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.4;
+      renderer.toneMappingExposure = 1.2; // أغمق قليلاً للجو السينمائي
       mountRef.current?.appendChild(renderer.domElement);
 
       buildRoom(THREE);
@@ -79,8 +79,14 @@ export default function Gallery() {
     };
 
     const buildRoom = (T) => {
-      const RW=22,RL=34,RH=5.5;
-      const m=(c,r=0.88,mt=0)=>new T.MeshStandardMaterial({color:c,roughness:r,metalness:mt});
+      const RW=22, RL=34, RH=5.5;
+      // مواد سينمائية: ألوان غامقة، مخملية، انعكاس متوسط
+      const m=(c,r=0.45,mt=0.4)=>new T.MeshStandardMaterial({color:c,roughness:r,metalness:mt});
+      
+      // أرضية خشبية داكنة
+      const floorMat = m(0x1e1a17, 0.55, 0.25);
+      const wallMat = m(0x14121a, 0.35, 0.15); // جدران رمادية غامقة مخملية
+      
       const box=(w,h,d,mat,px,py,pz)=>{
         const mesh=new T.Mesh(new T.BoxGeometry(w,h,d),mat);
         mesh.position.set(px,py,pz);
@@ -88,25 +94,41 @@ export default function Gallery() {
         scene.add(mesh); return mesh;
       };
 
-      const wallM=m(0x444448); // جدران رمادية متوسطة لتفتيح المكان
-      box(RW,0.22,RL,m(0x333336, 0.3, 0.2),0,-0.11,0); // أرضية رخامية فاتحة
-      box(RW,0.12,RL,m(0x55555a,0.98),0,RH,0);
+      box(RW,0.22,RL,floorMat,0,-0.11,0); // أرضية
+      box(RW,0.12,RL,m(0x0a0a14,0.98),0,RH,0); // سقف
       
-      box(0.25,RH,RL,wallM,-RW/2,RH/2,0);
-      box(0.25,RH,RL,wallM, RW/2,RH/2,0);
-      box(RW,RH,0.25,wallM,0,RH/2,-RL/2);
-      box(RW,RH,0.25,wallM,0,RH/2, RL/2);
-      box(0.25,RH,7,wallM,-5.5,RH/2,-7);
-      box(0.25,RH,7,wallM, 5.5,RH/2,-7);
-      box(0.25,RH,7,wallM,-5.5,RH/2, 6);
-      box(0.25,RH,7,wallM, 5.5,RH/2, 6);
+      box(0.25,RH,RL,wallMat,-RW/2,RH/2,0);
+      box(0.25,RH,RL,wallMat, RW/2,RH/2,0);
+      box(RW,RH,0.25,wallMat,0,RH/2,-RL/2);
+      box(RW,RH,0.25,wallMat,0,RH/2, RL/2);
+      box(0.25,RH,7,wallMat,-5.5,RH/2,-7);
+      box(0.25,RH,7,wallMat, 5.5,RH/2,-7);
+      box(0.25,RH,7,wallMat,-5.5,RH/2, 6);
+      box(0.25,RH,7,wallMat, 5.5,RH/2, 6);
 
-      // رفع الإضاءة العامة لإنقاذ الموقف
-      scene.add(new T.AmbientLight(0xffffff, 0.85));
-      scene.add(new T.HemisphereLight(0xffffff, 0x444444, 0.5));
+      // إضاءة سينمائية محيطة
+      scene.add(new T.AmbientLight(0x221c1a, 0.45)); // دافئة خافتة
+      scene.add(new T.HemisphereLight(0x2a2522, 0x0a0808, 0.6));
+      
+      // أضواء اتجاهية سينمائية
+      const keyLight = new T.DirectionalLight(0xffdd99, 1.2);
+      keyLight.position.set(5, 8, 7);
+      keyLight.castShadow = true;
+      keyLight.shadow.mapSize.width = 1024;
+      keyLight.shadow.mapSize.height = 1024;
+      scene.add(keyLight);
+      
+      const fillLight = new T.DirectionalLight(0x88aaff, 0.5);
+      fillLight.position.set(-4, 3, -5);
+      scene.add(fillLight);
+      
+      const backLight = new T.PointLight(0xffaa66, 0.6);
+      backLight.position.set(0, 3, -12);
+      scene.add(backLight);
 
-      const railM=m(0x181820,0.15,0.95), coneM=m(0x101018,0.1,0.97);
-      const glowM=new T.MeshStandardMaterial({color:0xfffce8,emissive:0xfffce8,emissiveIntensity:1.2,roughness:0,metalness:0});
+      // إضاءة رفوف (سينمائية)
+      const railM=m(0x2a2622,0.15,0.85), coneM=m(0x181414,0.1,0.9);
+      const glowM=new T.MeshStandardMaterial({color:0xffcc88,emissive:0xcc8844,emissiveIntensity:0.7,roughness:0.2,metalness:0.1});
 
       [-7,0,7].forEach(rx=>{
         const rail=new T.Mesh(new T.BoxGeometry(0.046,0.036,RL-1),railM);
@@ -120,14 +142,17 @@ export default function Gallery() {
           const lens=new T.Mesh(new T.CircleGeometry(0.068,20),glowM);
           lens.rotation.x=Math.PI/2; lens.position.y=-0.432; g.add(lens);
           scene.add(g);
-          const spot=new T.SpotLight(0xfff8e0, 3, 20, Math.PI/5, 0.3, 1);
+          // ضوء بقعة دافئ
+          const spot=new T.SpotLight(0xffcc99, 2.5, 18, Math.PI/6, 0.4, 1.2);
           spot.position.set(rx,RH-0.44,rz);
-          spot.target.position.set(rx,0,rz);
-          spot.castShadow=true; scene.add(spot); scene.add(spot.target);
+          spot.target.position.set(rx,0.8,rz);
+          spot.castShadow=true;
+          scene.add(spot); scene.add(spot.target);
         });
       });
 
-      const seatM=m(0x1a1a1a,0.62,0.05), legM=m(0x181828,0.2,0.88);
+      // مقاعد سينمائية (جلد داكن)
+      const seatM=m(0x1a1410,0.55,0.08), legM=m(0x12100e,0.3,0.7);
       [[0,0],[0,-12],[0,12],[-8,0],[8,0]].forEach(([bx,bz])=>{
         const g=new T.Group(); g.position.set(bx,0,bz);
         const seat=new T.Mesh(new T.BoxGeometry(1.9,0.09,0.55),seatM);
@@ -164,16 +189,16 @@ export default function Gallery() {
       group.position.set(...slot.pos);
       group.rotation.y=slot.rotY;
       const fColor=FRAME_COLORS[slot.id%FRAME_COLORS.length];
-      const fMat=new T.MeshStandardMaterial({color:fColor,roughness:0.18,metalness:0.7});
+      const fMat=new T.MeshStandardMaterial({color:fColor,roughness:0.2,metalness:0.75});
 
       const finalize=(fw,fh,tex,hasPhoto)=>{
         const frameMesh=new T.Mesh(makeFrameGeo(T,fw,fh),fMat);
         frameMesh.position.z=-0.035; frameMesh.castShadow=true; group.add(frameMesh);
         const back=new T.Mesh(new T.BoxGeometry(fw,fh,0.015),
-          new T.MeshStandardMaterial({color:0xfaf7f3,roughness:0.9}));
+          new T.MeshStandardMaterial({color:0x1e1a1a,roughness:0.7}));
         back.position.z=0.02; group.add(back);
         const imgMesh=new T.Mesh(new T.PlaneGeometry(fw,fh),
-          new T.MeshStandardMaterial({map:tex,roughness:0.82, emissive: 0xffffff, emissiveIntensity: 0.15}));
+          new T.MeshStandardMaterial({map:tex,roughness:0.7, emissive: 0xccaa88, emissiveIntensity: 0.12}));
         imgMesh.position.z=0.036; group.add(imgMesh);
         addPicLight(T,group,fw,fh,hasPhoto);
         addLabel(T,group,slot.id,fw,fh,hasPhoto);
@@ -203,18 +228,18 @@ export default function Gallery() {
     const makePlaceholder=(T,slotId)=>{
       const cv=document.createElement('canvas'); cv.width=360; cv.height=270;
       const ctx=cv.getContext('2d');
-      ctx.fillStyle='#f0ece6'; ctx.fillRect(0,0,360,270);
-      ctx.strokeStyle='#d4cec6'; ctx.lineWidth=1.5; ctx.setLineDash([8,6]);
+      ctx.fillStyle='#1e1916'; ctx.fillRect(0,0,360,270);
+      ctx.strokeStyle='#aa8866'; ctx.lineWidth=2; ctx.setLineDash([8,6]);
       ctx.strokeRect(16,16,328,238);
-      ctx.fillStyle='#b8b0a8'; ctx.font='bold 54px sans-serif'; ctx.textAlign='center';
+      ctx.fillStyle='#ccaa88'; ctx.font='bold 54px sans-serif'; ctx.textAlign='center';
       ctx.fillText(slotId.toString(),180,155);
       return new T.CanvasTexture(cv);
     };
 
     const addPicLight=(T,group,fw,fh,lit)=>{
       if(!lit) return;
-      const brassM=new T.MeshStandardMaterial({color:0xc4a040,roughness:0.16,metalness:0.9});
-      const shadeM=new T.MeshStandardMaterial({color:0x0e0e18,roughness:0.15,metalness:0.95});
+      const brassM=new T.MeshStandardMaterial({color:0xccaa77,roughness:0.2,metalness:0.85});
+      const shadeM=new T.MeshStandardMaterial({color:0x0e0c0c,roughness:0.15,metalness:0.9});
       const g=new T.Group(); g.position.set(0,fh/2+0.195,0.16);
       g.add(new T.Mesh(new T.BoxGeometry(fw*0.46,0.05,0.04),brassM));
       const arm=new T.Mesh(new T.CylinderGeometry(0.01,0.01,0.16,8),brassM);
@@ -223,9 +248,11 @@ export default function Gallery() {
       shade.rotation.x=-Math.PI/2; shade.position.z=0.16; g.add(shade);
       group.add(g);
       
-      const pl=new T.SpotLight(0xfff8cc, 6, 8, Math.PI/7, 0.4, 2);
+      // إضاءة الصورة سينمائية دافئة
+      const pl=new T.SpotLight(0xffcc88, 5.5, 7, Math.PI/5, 0.5, 1.5);
       pl.position.set(0,fh/2+1, 1.5);
-      pl.target.position.set(0, 0, 0);
+      pl.target.position.set(0, 0.2, 0);
+      pl.castShadow = true;
       group.add(pl); group.add(pl.target);
     };
 
@@ -233,8 +260,8 @@ export default function Gallery() {
       if(!hasPhoto) return;
       const cv=document.createElement('canvas'); cv.width=140; cv.height=52;
       const ctx=cv.getContext('2d');
-      ctx.fillStyle='rgba(26,26,46,0.8)'; ctx.beginPath(); ctx.roundRect(0,0,140,52,9); ctx.fill();
-      ctx.fillStyle='#ffffff'; ctx.font='bold 28px sans-serif'; ctx.textAlign='center';
+      ctx.fillStyle='rgba(10,8,12,0.85)'; ctx.beginPath(); ctx.roundRect(0,0,140,52,9); ctx.fill();
+      ctx.fillStyle='#e6d5c3'; ctx.font='bold 28px sans-serif'; ctx.textAlign='center';
       ctx.fillText('#'+slotId,70,36);
       const sprite=new T.Mesh(new T.PlaneGeometry(0.44,0.165),
         new T.MeshStandardMaterial({map:new T.CanvasTexture(cv),transparent:true,depthWrite:false}));
@@ -266,7 +293,7 @@ export default function Gallery() {
         e.preventDefault();
         for(const t of e.changedTouches){
           if(t.identifier===s.lookTouch.id){
-            const dx=t.clientX-s.lookTouch.lastX; const dy=t.clientY-s.lastY;
+            const dx=t.clientX-s.lookTouch.lastX; const dy=t.clientY-s.lookTouch.lastY;
             s.yaw -= dx*0.004; s.pitch -= dy*0.004; s.pitch = Math.max(-1.1,Math.min(1.1,s.pitch));
             s.lookTouch.lastX=t.clientX; s.lookTouch.lastY=t.clientY;
           }
@@ -354,36 +381,36 @@ export default function Gallery() {
   return(
     <>
       <Head>
-        <title>معرض الفوتوغرافيا الافتراضي</title>
+        <title>معرض سينمائي - فوتوغرافيا</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
       </Head>
       <div ref={mountRef} style={{width:'100vw',height:'100dvh',background:'#000'}}/>
 
       {!entered&&(
-        <div style={{position:'fixed',inset:0,zIndex:200,background:'#111',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',fontFamily:'sans-serif'}}>
-          <h1 style={{color:'#fff',letterSpacing:'0.4em',fontWeight:100,fontSize:'3rem'}}>GALLERY</h1>
-          <button onClick={()=>setEntered(true)} style={{background:'none',border:'1px solid #666',color:'#eee',padding:'12px 40px',cursor:'pointer',marginTop:'30px',borderRadius:'4px'}}>دخول المعرض →</button>
+        <div style={{position:'fixed',inset:0,zIndex:200,background:'#0a0808',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',fontFamily:'sans-serif'}}>
+          <h1 style={{color:'#e6d5c3',letterSpacing:'0.3em',fontWeight:300,fontSize:'3rem',borderBottom:'1px solid #aa8866',paddingBottom:20}}>CINEMA GALLERY</h1>
+          <button onClick={()=>setEntered(true)} style={{background:'none',border:'1px solid #aa8866',color:'#e6d5c3',padding:'12px 40px',cursor:'pointer',marginTop:'30px',borderRadius:'4px',transition:'0.2s'}} onMouseEnter={e=>{e.target.style.background='#aa8866';e.target.style.color='#0a0808'}} onMouseLeave={e=>{e.target.style.background='none';e.target.style.color='#e6d5c3'}}>دخول المعرض →</button>
         </div>
       )}
 
       {entered&&photoInfo&&(
-        <div style={{position:'fixed',bottom:'15%',left:'50%',transform:'translateX(-50%)',zIndex:100}}>
-          <div style={{background:'rgba(0,0,0,0.85)',padding:'15px 30px',borderRadius:'8px',color:'#fff',textAlign:'center',backdropFilter:'blur(10px)',border:'1px solid #222'}}>
-            <div style={{fontSize:'1.1rem',fontWeight:600}}>{photoInfo.title}</div>
-            <div style={{fontSize:'0.8rem',color:'#888'}}>{photoInfo.sub}</div>
+        <div style={{position:'fixed',bottom:'15%',left:'50%',transform:'translateX(-50%)',zIndex:100,fontFamily:'sans-serif'}}>
+          <div style={{background:'rgba(10,8,12,0.9)',padding:'15px 30px',borderRadius:'8px',color:'#e6d5c3',textAlign:'center',backdropFilter:'blur(12px)',border:'1px solid #aa8866',boxShadow:'0 0 15px rgba(170,136,102,0.3)'}}>
+            <div style={{fontSize:'1.2rem',fontWeight:500,letterSpacing:'0.05em'}}>{photoInfo.title}</div>
+            <div style={{fontSize:'0.8rem',color:'#aa8866'}}>{photoInfo.sub}</div>
           </div>
         </div>
       )}
 
       {entered&&isMobile&&(
-        <div style={{position:'fixed',bottom:30,left:30,width:110,height:110,borderRadius:'50%',background:'rgba(255,255,255,0.1)',border:'1px solid rgba(255,255,255,0.2)',zIndex:100,pointerEvents:'auto'}} ref={joystickZoneRef}>
-          <div ref={joystickKnobRef} style={{position:'absolute',top:'50%',left:'50%',width:40,height:40,borderRadius:'50%',background:'#fff',transform:'translate(-50%,-50%)'}}/>
+        <div style={{position:'fixed',bottom:30,left:30,width:110,height:110,borderRadius:'50%',background:'rgba(30,25,22,0.4)',border:'1px solid rgba(170,136,102,0.5)',zIndex:100,pointerEvents:'auto',backdropFilter:'blur(5px)'}} ref={joystickZoneRef}>
+          <div ref={joystickKnobRef} style={{position:'absolute',top:'50%',left:'50%',width:40,height:40,borderRadius:'50%',background:'#aa8866',boxShadow:'0 0 10px rgba(170,136,102,0.8)',transform:'translate(-50%,-50%)'}}/>
         </div>
       )}
 
       {entered&&(
         <div style={{position:'fixed',top:20,right:20,zIndex:100}}>
-          <button onClick={()=>setEntered(false)} style={{background:'rgba(0,0,0,0.5)',color:'#fff',border:'1px solid #333',padding:'8px 20px',borderRadius:5,cursor:'pointer'}}>خروج</button>
+          <button onClick={()=>setEntered(false)} style={{background:'rgba(10,8,12,0.7)',color:'#e6d5c3',border:'1px solid #aa8866',padding:'8px 20px',borderRadius:5,cursor:'pointer',backdropFilter:'blur(5px)'}}>خروج</button>
         </div>
       )}
     </>
