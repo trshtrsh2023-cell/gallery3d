@@ -56,9 +56,9 @@ export default function Gallery() {
     const init = async () => {
       THREE = await import('three');
       scene = new THREE.Scene();
-      // تم التعديل: خلفية فاتحة قليلاً لضمان الرؤية
-      scene.background = new THREE.Color(0x111112); 
-      scene.fog = new THREE.FogExp2(0x111112, 0.02);
+      // تعديل: خلفية فاتحة لضمان الرؤية الكاملة
+      scene.background = new THREE.Color(0x222225); 
+      scene.fog = new THREE.FogExp2(0x222225, 0.005);
 
       camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 100);
       camera.position.set(0,1.7,13);
@@ -69,7 +69,7 @@ export default function Gallery() {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.3;
+      renderer.toneMappingExposure = 1.4;
       mountRef.current?.appendChild(renderer.domElement);
 
       buildRoom(THREE);
@@ -88,13 +88,9 @@ export default function Gallery() {
         scene.add(mesh); return mesh;
       };
 
-      const wallM=m(0x2a2a2c); // جدران رمادية داكنة (ليست سوداء)
-      
-      // أرضية رخامية بلمعة خفيفة (تسمح بالرؤية)
-      const floorM = new T.MeshStandardMaterial({ color:0x151518, roughness:0.25, metalness:0.4 });
-      
-      box(RW,0.22,RL,floorM,0,-0.11,0);
-      box(RW,0.12,RL,m(0x1a1a1c,0.98),0,RH,0);
+      const wallM=m(0x444448); // جدران رمادية متوسطة لتفتيح المكان
+      box(RW,0.22,RL,m(0x333336, 0.3, 0.2),0,-0.11,0); // أرضية رخامية فاتحة
+      box(RW,0.12,RL,m(0x55555a,0.98),0,RH,0);
       
       box(0.25,RH,RL,wallM,-RW/2,RH/2,0);
       box(0.25,RH,RL,wallM, RW/2,RH/2,0);
@@ -105,9 +101,9 @@ export default function Gallery() {
       box(0.25,RH,7,wallM,-5.5,RH/2, 6);
       box(0.25,RH,7,wallM, 5.5,RH/2, 6);
 
-      // رفع الإضاءة العامة لرؤية المعرض بوضوح
-      scene.add(new T.AmbientLight(0xffffff, 0.45));
-      scene.add(new T.HemisphereLight(0xffffff, 0x000000, 0.35));
+      // رفع الإضاءة العامة لإنقاذ الموقف
+      scene.add(new T.AmbientLight(0xffffff, 0.85));
+      scene.add(new T.HemisphereLight(0xffffff, 0x444444, 0.5));
 
       const railM=m(0x181820,0.15,0.95), coneM=m(0x101018,0.1,0.97);
       const glowM=new T.MeshStandardMaterial({color:0xfffce8,emissive:0xfffce8,emissiveIntensity:1.2,roughness:0,metalness:0});
@@ -124,15 +120,14 @@ export default function Gallery() {
           const lens=new T.Mesh(new T.CircleGeometry(0.068,20),glowM);
           lens.rotation.x=Math.PI/2; lens.position.y=-0.432; g.add(lens);
           scene.add(g);
-          
-          const spot=new T.SpotLight(0xfff8e0, 2, 18, Math.PI/6, 0.3, 1);
+          const spot=new T.SpotLight(0xfff8e0, 3, 20, Math.PI/5, 0.3, 1);
           spot.position.set(rx,RH-0.44,rz);
           spot.target.position.set(rx,0,rz);
           spot.castShadow=true; scene.add(spot); scene.add(spot.target);
         });
       });
 
-      const seatM=m(0x1a1a1a,0.62,0.05), legM=m(0x101010,0.2,0.88);
+      const seatM=m(0x1a1a1a,0.62,0.05), legM=m(0x181828,0.2,0.88);
       [[0,0],[0,-12],[0,12],[-8,0],[8,0]].forEach(([bx,bz])=>{
         const g=new T.Group(); g.position.set(bx,0,bz);
         const seat=new T.Mesh(new T.BoxGeometry(1.9,0.09,0.55),seatM);
@@ -178,7 +173,7 @@ export default function Gallery() {
           new T.MeshStandardMaterial({color:0xfaf7f3,roughness:0.9}));
         back.position.z=0.02; group.add(back);
         const imgMesh=new T.Mesh(new T.PlaneGeometry(fw,fh),
-          new T.MeshStandardMaterial({map:tex,roughness:0.82, emissive: 0xffffff, emissiveIntensity: 0.1}));
+          new T.MeshStandardMaterial({map:tex,roughness:0.82, emissive: 0xffffff, emissiveIntensity: 0.15}));
         imgMesh.position.z=0.036; group.add(imgMesh);
         addPicLight(T,group,fw,fh,hasPhoto);
         addLabel(T,group,slot.id,fw,fh,hasPhoto);
@@ -228,7 +223,7 @@ export default function Gallery() {
       shade.rotation.x=-Math.PI/2; shade.position.z=0.16; g.add(shade);
       group.add(g);
       
-      const pl=new T.SpotLight(0xfff8cc, 5.5, 7, Math.PI/7, 0.4, 2);
+      const pl=new T.SpotLight(0xfff8cc, 6, 8, Math.PI/7, 0.4, 2);
       pl.position.set(0,fh/2+1, 1.5);
       pl.target.position.set(0, 0, 0);
       group.add(pl); group.add(pl.target);
@@ -271,7 +266,7 @@ export default function Gallery() {
         e.preventDefault();
         for(const t of e.changedTouches){
           if(t.identifier===s.lookTouch.id){
-            const dx=t.clientX-s.lookTouch.lastX; const dy=t.clientY-s.lookTouch.lastY;
+            const dx=t.clientX-s.lookTouch.lastX; const dy=t.clientY-s.lastY;
             s.yaw -= dx*0.004; s.pitch -= dy*0.004; s.pitch = Math.max(-1.1,Math.min(1.1,s.pitch));
             s.lookTouch.lastX=t.clientX; s.lookTouch.lastY=t.clientY;
           }
@@ -365,9 +360,9 @@ export default function Gallery() {
       <div ref={mountRef} style={{width:'100vw',height:'100dvh',background:'#000'}}/>
 
       {!entered&&(
-        <div style={{position:'fixed',inset:0,zIndex:200,background:'#0a0a0c',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',fontFamily:'sans-serif'}}>
+        <div style={{position:'fixed',inset:0,zIndex:200,background:'#111',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',fontFamily:'sans-serif'}}>
           <h1 style={{color:'#fff',letterSpacing:'0.4em',fontWeight:100,fontSize:'3rem'}}>GALLERY</h1>
-          <button onClick={()=>setEntered(true)} style={{background:'none',border:'1px solid #444',color:'#aaa',padding:'12px 40px',cursor:'pointer',marginTop:'30px',borderRadius:'4px'}}>دخول المعرض →</button>
+          <button onClick={()=>setEntered(true)} style={{background:'none',border:'1px solid #666',color:'#eee',padding:'12px 40px',cursor:'pointer',marginTop:'30px',borderRadius:'4px'}}>دخول المعرض →</button>
         </div>
       )}
 
