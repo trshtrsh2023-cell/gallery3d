@@ -613,13 +613,10 @@ export default function Gallery() {
       shade.rotation.set(-Math.PI/2,0,Math.PI/2); // open side down
       shade.position.z=0.155; g.add(shade);
 
-      // Shade end caps
+      // Shade end caps (thin box approximation)
       [-shadeLen/2,shadeLen/2].forEach(ex=>{
-        const ec=new T.Mesh(new T.SemiCircleGeometry?new T.CircleGeometry(0.042,12,0,Math.PI):
-          new T.CircleGeometry(0.042,12),dark);
-        // Use box as approximation
-        const ecb=new T.Mesh(new T.BoxGeometry(0.042*2,0.001,0.042),dark);
-        ecb.position.set(ex,0.042,0.155); g.add(ecb);
+        const ecb=new T.Mesh(new T.BoxGeometry(0.004,0.072,0.072),dark);
+        ecb.position.set(ex,0.028,0.155); g.add(ecb);
       });
 
       // Inner reflector
