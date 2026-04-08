@@ -434,8 +434,7 @@ export default function Gallery() {
       addTrackRow([-9,0,9],[-12,-7,-2,3],MHH);
 
       // Ambient + fill
-      scene.add(new T.AmbientLight(0xfff8f2,.6));
-      scene.add(new T.HemisphereLight(0xfff5ee,0xd0c8bc,.38));
+      scene.add(new T.AmbientLight(0xffffff, 1.0)); // إضاءة عامة قوية للوضوح      scene.add(new T.HemisphereLight(0xfff5ee,0xd0c8bc,.38));
 
       // ── WELCOME PLAQUE ──
       const PW=6.5,PH=3.8;
