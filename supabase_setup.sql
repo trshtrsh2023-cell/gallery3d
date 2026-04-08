@@ -1,5 +1,6 @@
 -- ========================================
 -- GALLERY 3D — إعداد قاعدة بيانات Supabase
+-- !! شغّل هذا كاملاً بما فيه جدول visitors !!
 -- شغّل هذا في SQL Editor في لوحة Supabase
 -- ========================================
 
@@ -51,3 +52,31 @@ CREATE POLICY "Public read storage"
 CREATE POLICY "Service role delete"
   ON storage.objects FOR DELETE
   USING (bucket_id = 'gallery-images' AND auth.role() = 'service_role');
+
+-- ========================================
+-- جدول الزوار (presence)
+-- ========================================
+CREATE TABLE IF NOT EXISTS visitors (
+  visitor_id  TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  x           FLOAT DEFAULT 0,
+  z           FLOAT DEFAULT 13,
+  yaw         FLOAT DEFAULT 0,
+  last_seen   TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS visitors_last_seen_idx ON visitors(last_seen);
+
+ALTER TABLE visitors ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Anyone can read visitors"
+  ON visitors FOR SELECT USING (true);
+
+CREATE POLICY "Anyone can upsert visitors"
+  ON visitors FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "Anyone can update visitors"
+  ON visitors FOR UPDATE USING (true);
+
+CREATE POLICY "Anyone can delete visitors"
+  ON visitors FOR DELETE USING (true);
