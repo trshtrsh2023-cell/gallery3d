@@ -673,60 +673,42 @@ export default function Gallery() {
       )}
 
       {/* ENTRY */}
-      {!entered && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'linear-gradient(155deg,#f0ebe2 0%,#e6e0d5 55%,#ddd8cf 100%)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: 'Georgia,serif', padding: 20, overflowY: 'auto' }}>
-          {[[-180, -120, 240], [160, 140, 195], [-100, 180, 162], [150, -200, 172]].map(([x, y, sz], i) => (
-            <div key={i} style={{ position: 'absolute', left: `calc(50% + ${x}px)`, top: `calc(50% + ${y}px)`, width: sz, height: sz, borderRadius: '50%', border: '1px solid rgba(160,138,100,.18)', transform: 'translate(-50%,-50%)' }} />
+      {!entered&&(
+        <div style={{position:'fixed',inset:0,zIndex:200,background:'linear-gradient(155deg,#f0ebe2 0%,#e6e0d5 55%,#ddd8cf 100%)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',fontFamily:'Georgia,serif',padding:20,overflowY:'auto'}}>
+          {[[-180,-120,240],[160,140,195],[-100,180,162],[150,-200,172]].map(([x,y,sz],i)=>(
+            <div key={i} style={{position:'absolute',left:`calc(50% + ${x}px)`,top:`calc(50% + ${y}px)`,width:sz,height:sz,borderRadius:'50%',border:'1px solid rgba(160,138,100,.18)',transform:'translate(-50%,-50%)'}}/>
           ))}
-          <div style={{ position: 'relative', textAlign: 'center', maxWidth: 460, width: '100%' }}>
-            <div style={{ width: 52, height: 52, margin: '0 auto 22px', border: '1.5px solid #a89070', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ width: 26, height: 26, background: '#8a7458' }} />
+          <div style={{position:'relative',textAlign:'center',maxWidth:460,width:'100%'}}>
+            <div style={{width:52,height:52,margin:'0 auto 22px',border:'1.5px solid #a89070',display:'flex',alignItems:'center',justifyContent:'center'}}>
+              <div style={{width:26,height:26,background:'#8a7458'}}/>
             </div>
-            <h1 style={{ fontSize: 'clamp(1.6rem,6vw,2.6rem)', fontWeight: 400, letterSpacing: '.35em', color: '#1e1a12', marginBottom: 4 }}>GALLERY</h1>
-            <div style={{ width: 50, height: 1, background: '#a89070', margin: '10px auto' }} />
-            <p style={{ color: '#7a6e5e', fontSize: 'clamp(.75rem,2.4vw,.9rem)', letterSpacing: '.15em', marginBottom: 5, ...F }}>معرض الفوتوغرافيا الافتراضي</p>
-            <p style={{ color: '#b0a090', fontSize: '.75rem', marginBottom: 6, ...F }}>إخراج: أنور محمد — AnwarBMA</p>
-            <p style={{ color: '#b0a898', fontSize: '.72rem', marginBottom: 20, ...F }}>{photos.length} عمل فني · 23 موقع عرض</p>
+            <h1 style={{fontSize:'clamp(1.6rem,6vw,2.6rem)',fontWeight:400,letterSpacing:'.35em',color:'#1e1a12',marginBottom:4}}>GALLERY</h1>
+            <div style={{width:50,height:1,background:'#a89070',margin:'10px auto'}}/>
+            <p style={{color:'#7a6e5e',fontSize:'clamp(.75rem,2.4vw,.9rem)',letterSpacing:'.15em',marginBottom:5,...F}}>معرض الفوتوغرافيا الافتراضي</p>
+            <p style={{color:'#b0a090',fontSize:'.75rem',marginBottom:6,...F}}>إخراج: أنور محمد — AnwarBMA</p>
+            <p style={{color:'#b0a898',fontSize:'.72rem',marginBottom:24,...F}}>{photos.length} عمل فني · 23 موقع عرض</p>
 
-            {/* حقل إدخال الاسم المضاف بعناية */}
-            <div style={{ marginBottom: '20px' }}>
-              <input
-                type="text"
-                placeholder="اكتب اسمك هنا..."
-                value={userName}
-                onChange={(e) => setUserName(e.target.value)}
-                style={{
-                  width: '100%',
-                  maxWidth: '280px',
-                  padding: '12px',
-                  border: '1px solid #a89070',
-                  background: 'rgba(255,255,255,0.5)',
-                  textAlign: 'center',
-                  fontSize: '0.9rem',
-                  fontFamily: 'inherit',
-                  outline: 'none',
-                  borderRadius: '2px',
-                  color: '#1e1a12'
-                }}
-              />
+            {/* NAME INPUT FIELD */}
+            <div style={{marginBottom:22}}>
+              <input type="text" placeholder="اكتب اسمك هنا..." value={userName} onChange={(e)=>setUserName(e.target.value)} 
+                style={{width:'100%',maxWidth:280,padding:'14px',border:'1px solid #a89070',background:'rgba(255,255,255,0.4)',textAlign:'center',fontSize:'.9rem',fontFamily:'inherit',outline:'none',color:'#1e1a12',borderRadius:2}}/>
             </div>
 
-            <button onClick={() => setEntered(true)} style={{ background: '#1e1a12', color: '#f4f0e8', border: 'none', padding: '15px 52px', fontSize: '.88rem', letterSpacing: '.22em', cursor: 'pointer', fontFamily: 'inherit', transition: 'all .3s', WebkitTapHighlightColor: 'transparent' }}
-              onMouseEnter={e => { e.target.style.background = '#8a7458'; }}
-              onMouseLeave={e => { e.target.style.background = '#1e1a12'; }}>
+            <button onClick={()=>setEntered(true)} style={{background:'#1e1a12',color:'#f4f0e8',border:'none',padding:'15px 52px',fontSize:'.88rem',letterSpacing:'.22em',cursor:'pointer',fontFamily:'inherit',transition:'all .3s',WebkitTapHighlightColor:'transparent'}}
+              onMouseEnter={e=>{e.target.style.background='#8a7458';}}
+              onMouseLeave={e=>{e.target.style.background='#1e1a12';}}>
               دخول المعرض
             </button>
-
-            <div style={{ marginTop: 28, display: 'flex', gap: 12, justifyCenter: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
-              {(isMobile ? [['↕↔ يسار', 'تحرك'], ['سحب يمين', 'انظر']] : [['W A S D', 'التحرك'], ['ماوس', 'النظر'], ['Shift', 'ركض']]).map(([k, l]) => (
-                <div key={k} style={{ textAlign: 'center' }}>
-                  <div style={{ background: 'rgba(255,250,242,.82)', border: '1px solid #d8d0c4', padding: '4px 11px', fontSize: '.72rem', color: '#2a2010', fontFamily: 'monospace', marginBottom: 3 }}>{k}</div>
-                  <div style={{ fontSize: '.64rem', color: '#a09080', ...F }}>{l}</div>
+            <div style={{marginTop:28,display:'flex',gap:12,justifyContent:'center',flexWrap:'wrap'}}>
+              {(isMobile?[['↕↔ يسار','تحرك'],['سحب يمين','انظر']]:[['W A S D','التحرك'],['ماوس','النظر'],['Shift','ركض']]).map(([k,l])=>(
+                <div key={k} style={{textAlign:'center'}}>
+                  <div style={{background:'rgba(255,250,242,.82)',border:'1px solid #d8d0c4',padding:'4px 11px',fontSize:'.72rem',color:'#2a2010',fontFamily:'monospace',marginBottom:3}}>{k}</div>
+                  <div style={{fontSize:'.64rem',color:'#a09080',...F}}>{l}</div>
                 </div>
               ))}
             </div>
-            <div style={{ marginTop: 30, paddingTop: 18, borderTop: '1px solid #d8d0c4' }}>
-              <a href="/admin/login" style={{ color: '#a09078', fontSize: '.73rem', letterSpacing: '.12em', textDecoration: 'none', borderBottom: '1px solid #c0b8a8', paddingBottom: 1, ...F }}>⚙ لوحة الإدارة</a>
+            <div style={{marginTop:30,paddingTop:18,borderTop:'1px solid #d8d0c4'}}>
+              <a href="/admin/login" style={{color:'#a09078',fontSize:'.73rem',letterSpacing:'.12em',textDecoration:'none',borderBottom:'1px solid #c0b8a8',paddingBottom:1,...F}}>⚙ لوحة الإدارة</a>
             </div>
           </div>
         </div>
