@@ -501,8 +501,7 @@ export default function Gallery() {
 
         const finalize=(fw,fh,tex,hasPhoto)=>{
           buildFrame(group,fw,fh,FRAME_COLORS[slot.id%FRAME_COLORS.length]);
-          const imgM=new T.Mesh(new T.PlaneGeometry(fw,fh),new T.MeshStandardMaterial({map:tex,roughness:.82}));
-          imgM.position.z=.066;group.add(imgM);
+          const imgM = new T.Mesh(new T.PlaneGeometry(fw, fh), new T.MeshBasicMaterial({ map: tex, transparent: true }));          imgM.position.z=.066;group.add(imgM);
           addPicLight(group,fw,fh,hasPhoto);
           addLabel(group,slot.id,fw,fh,hasPhoto);
           group.userData={title:ph?.title||'',sub:ph?.subtitle||'',hasPhoto,imageUrl:ph?.image_url||null};
