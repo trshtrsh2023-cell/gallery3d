@@ -313,10 +313,10 @@ export default function Gallery() {
 
       // Single shared materials — no per-object texture creation
       const MAT = {
-        wall:   new T.MeshStandardMaterial({map:wallTex, roughness:.9, metalness:0}),
-        floor:  new T.MeshStandardMaterial({map:floorTex, roughness:.44, metalness:.08}),
-        ceil:   new T.MeshStandardMaterial({color:0xf0ede8, roughness:.96}),
-        carpet: new T.MeshStandardMaterial({map:carpetTex, roughness:.88}),
+        wall:   new T.MeshBasicMaterial({map: wallTex}),
+        floor:  new T.MeshBasicMaterial({map: floorTex}),
+        ceil:   new T.MeshBasicMaterial({color: 0xf0ede8}),
+        carpet: new T.MeshBasicMaterial({map: carpetTex}),
         mold:   new T.MeshStandardMaterial({color:0xd8d0c0, roughness:.6, metalness:.03}),
         base:   new T.MeshStandardMaterial({color:0xccc4b2, roughness:.65}),
         track:  new T.MeshStandardMaterial({color:0x181820, roughness:.1, metalness:.97}),
