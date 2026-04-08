@@ -310,12 +310,15 @@ export default function Gallery() {
       const m=(c,r=.88,mt=0,map=null)=>new T.MeshStandardMaterial({color:c,roughness:r,metalness:mt,...(map?{map}:{})});
       const box=(w,h,d,mat,px,py,pz)=>{const mesh=new T.Mesh(new T.BoxGeometry(w,h,d),mat);mesh.position.set(px,py,pz);mesh.receiveShadow=mesh.castShadow=true;scene.add(mesh);return mesh;};
 
-      const wallTex=new T.CanvasTexture(mkWallTex());wallTex.wrapS=wallTex.wrapT=T.RepeatWrapping;wallTex.repeat.set(4,2);
+      const wallTex = new T.CanvasTexture(mkWallTex()); 
+      wallTex.wrapS = wallTex.wrapT = T.RepeatWrapping; 
+      wallTex.repeat.set(4, 2); // النقوش تتكرر لتبدو واقعية
+      
       const floorTex=new T.CanvasTexture(mkFloorTex());floorTex.wrapS=floorTex.wrapT=T.RepeatWrapping;floorTex.repeat.set(7,10);
       const ceilTex=new T.CanvasTexture(mkCeilTex());ceilTex.wrapS=ceilTex.wrapT=T.RepeatWrapping;ceilTex.repeat.set(4,6);
       const carpetTex=new T.CanvasTexture(mkCarpetTex());carpetTex.wrapS=carpetTex.wrapT=T.RepeatWrapping;carpetTex.repeat.set(1,3);
 
-      const wallM =m(0xffffff,.92,0,wallTex);
+      const wallM = new T.MeshStandardMaterial({ map: wallTex, roughness: 0.92, metalness: 0 });
       const floorM=m(0xffffff,.42,.1,floorTex);
       const ceilM =m(0xffffff,.97,0,ceilTex);
       const moldM =m(0xdad2c2,.58,.03);
@@ -434,7 +437,7 @@ export default function Gallery() {
       addTrackRow([-9,0,9],[-12,-7,-2,3],MHH);
 
       // Ambient + fill
-      scene.add(new T.AmbientLight(0xffffff, 1.0)); // إضاءة عامة قوية للوضوح      scene.add(new T.HemisphereLight(0xfff5ee,0xd0c8bc,.38));
+      scene.add(new T.AmbientLight(0xffffff, 1.0)); // إضاءة كاملة لرؤية كل المواقع الـ 23
 
       // ── WELCOME PLAQUE ──
       const PW=6.5,PH=3.8;
@@ -495,7 +498,7 @@ export default function Gallery() {
 
       const finalize=(fw,fh,tex,hasPhoto)=>{
         buildFrame(T,group,fw,fh,style);
-      const img = new T.Mesh(new T.PlaneGeometry(fw,fh), new T.MeshBasicMaterial({map:tex, transparent:true}));
+      const img = new T.Mesh(new T.PlaneGeometry(fw, fh), new T.MeshBasicMaterial({ map: tex, transparent: true }));
         img.position.z=.066;group.add(img);
         addPicLight(T,group,fw,fh,hasPhoto);
         addLabel(T,group,slot.id,fw,fh,hasPhoto);
