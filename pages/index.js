@@ -297,8 +297,8 @@ export default function Gallery() {
       renderer.setSize(innerWidth,innerHeight);
       renderer.shadowMap.enabled=true;
       renderer.shadowMap.type=T.PCFSoftShadowMap;
-      renderer.toneMapping=T.ACESFilmicToneMapping;
-      renderer.toneMappingExposure=0.9;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.6; // خفض التعرض للضوء ليعيد تفاصيل الجدران
       mountRef.current?.appendChild(renderer.domElement);
 
       // ── CREATE SHARED MATERIALS (max ~8 textures total) ──
@@ -418,8 +418,7 @@ export default function Gallery() {
       addSpots([-9,0,9],[-12,-7,-2,3],MHH);
 
       // Ambient
-      scene.add(new T.AmbientLight(0xffffff, 0.6)); // تقليل الشدة لكي لا يطغى البياض      scene.add(new T.HemisphereLight(0xfff5ee,0xd0c8bc,.4));
-      const fill=new T.PointLight(0xfff8f0,.7,25,2);fill.position.set(0,3,13);scene.add(fill);
+      scene.add(new T.AmbientLight(0xffffff, 0.4)); // خفض الرقم من 1.0 إلى 0.4      const fill=new T.PointLight(0xfff8f0,.7,25,2);fill.position.set(0,3,13);scene.add(fill);
 
       // ── WELCOME PLAQUE ────────────────────────────────────
       const PW=6.5,PH=3.8,bw=.18,fd=.1;
@@ -490,7 +489,8 @@ export default function Gallery() {
         ctx2.fillStyle=sh;ctx2.beginPath();ctx2.roundRect(0,0,160,27,27);ctx2.fill();
         ctx2.fillStyle=hasPhoto?'#fff':'#c0b8b0';ctx2.font='bold 25px -apple-system,Segoe UI,sans-serif';ctx2.textAlign='center';ctx2.fillText('#'+slotId,80,37);
         const t=new T.CanvasTexture(cv);
-        const sp=new T.Mesh(new T.PlaneGeometry(.5,.17),new T.MeshBasicMaterial({map:t,transparent:true,depthWrite:false}));
+        // ابحث عن هذا السطر داخل addPicLight
+        const pl = new T.SpotLight(0xffffff, 1.0, 7, Math.PI/9, .2, 1.8); // اجعل الرقم الثاني 1.0 بدلاً من 4.0
         sp.position.set(0,fh/2+.62,.08);group.add(sp);
       };
 
