@@ -332,11 +332,13 @@ export default function Gallery() {
         seatM:  new T.MeshStandardMaterial({color:0xb89658, roughness:.62, metalness:.02}),
       };
 
-      const box=(w,h,d,mat,px,py,pz)=>{
-        const mesh=new T.Mesh(new T.BoxGeometry(w,h,d),mat);
-        mesh.position.set(px,py,pz);
-        mesh.receiveShadow=mesh.castShadow=true;
-        scene.add(mesh);return mesh;
+      const box = (w, h, d, mat, px, py, pz) => {
+      const mesh = new T.Mesh(new T.BoxGeometry(w, h, d), mat);
+      mesh.position.set(px, py, pz);
+      // تعطيل هذه الأسطر للجدران والأرضية لإنهاء مشكلة البياض
+      // mesh.receiveShadow = mesh.castShadow = true; 
+      scene.add(mesh);
+      return mesh;
       };
 
       // ── MAIN HALL ─────────────────────────────────────────
@@ -416,8 +418,7 @@ export default function Gallery() {
       addSpots([-9,0,9],[-12,-7,-2,3],MHH);
 
       // Ambient
-      scene.add(new T.AmbientLight(0xfff8f0,.62));
-      scene.add(new T.HemisphereLight(0xfff5ee,0xd0c8bc,.4));
+      scene.add(new T.AmbientLight(0xffffff, 0.6)); // تقليل الشدة لكي لا يطغى البياض      scene.add(new T.HemisphereLight(0xfff5ee,0xd0c8bc,.4));
       const fill=new T.PointLight(0xfff8f0,.7,25,2);fill.position.set(0,3,13);scene.add(fill);
 
       // ── WELCOME PLAQUE ────────────────────────────────────
