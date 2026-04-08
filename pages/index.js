@@ -496,7 +496,7 @@ export default function Gallery() {
 
       const finalize=(fw,fh,tex,hasPhoto)=>{
         buildFrame(T,group,fw,fh,style);
-        const img=new T.Mesh(new T.PlaneGeometry(fw,fh),new T.MeshStandardMaterial({map:tex,roughness:.82,metalness:0}));
+      const img = new T.Mesh(new T.PlaneGeometry(fw,fh), new T.MeshBasicMaterial({map:tex, transparent:true}));
         img.position.z=.066;group.add(img);
         addPicLight(T,group,fw,fh,hasPhoto);
         addLabel(T,group,slot.id,fw,fh,hasPhoto);
