@@ -179,8 +179,6 @@ export default function Gallery(){
   // lerpTargets: { visitorId: { x, z, yaw } }  — smooth targets for render loop
   const visitorsRef  = useRef({});
   const lerpTargets  = useRef({});
-  const presChannel  = useRef(null);
-  const lastBroadcast= useRef(0);
   const jZoneRef  = useRef(null);
   const jKnobRef  = useRef(null);
 
@@ -202,115 +200,80 @@ export default function Gallery(){
     fetch('/api/visits').then(r=>r.json()).then(d=>setVisitCount(d?.count||0)).catch(()=>{});
   },[]);
 
-  // ── Supabase Realtime Presence — replaces polling entirely ────
+  // ── Visitor presence: REST polling (reliable) + Lerp smoothing ─
   useEffect(()=>{
     if(!entered||!visitorName) return;
 
-    // Log visit to DB
+    // Log visit
     fetch('/api/visits',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({visitor_name:visitorName})}).catch(()=>{});
     fetch('/api/visits').then(r=>r.json()).then(d=>setVisitCount(d?.count||0)).catch(()=>{});
 
-    const supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supaKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const myId   = getVid();
+    const colors = {}; // stable colorIdx per visitor
+    let nextColor = 0;
+    let lastSend  = 0;
+    let alive     = true;
 
-    if(!supaUrl||!supaKey){
-      // Fallback: simple REST polling every 2.5s if Supabase not configured
-      const myId=getVid();
-      const sendPos=async()=>{
-        const s=stateRef.current;
-        try{ await fetch('/api/visitors',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({visitor_id:myId,name:visitorName,x:s.pos.x,z:s.pos.z,yaw:s.yaw})}); }catch(e){}
-      };
-      const getOthers=async()=>{
-        try{
-          const r=await fetch('/api/visitors');if(!r.ok)return;
-          const d=await r.json();
-          const others=(Array.isArray(d)?d:[]).filter(v=>v.visitor_id!==myId);
-          const map={};
-          others.forEach((v,i)=>{ map[v.visitor_id]={name:v.name,x:v.x||0,z:v.z||21,yaw:v.yaw||0,colorIdx:i}; lerpTargets.current[v.visitor_id]=lerpTargets.current[v.visitor_id]||{x:v.x||0,z:v.z||21,yaw:v.yaw||0}; lerpTargets.current[v.visitor_id].x=v.x||0; lerpTargets.current[v.visitor_id].z=v.z||21; lerpTargets.current[v.visitor_id].yaw=v.yaw||0; });
-          visitorsRef.current=map;
-          setVisitorsUI(others);
-        }catch(e){}
-      };
-      sendPos();
-      const p=setInterval(sendPos,50); // throttle 50ms
-      const q=setInterval(getOthers,2500);
-      getOthers();
-      return()=>{
-        clearInterval(p);clearInterval(q);
-        fetch('/api/visitors',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({visitor_id:myId})}).catch(()=>{});
-      };
-    }
-
-    // ── Supabase Realtime Presence channel ──────────────────────
-    import('@supabase/supabase-js').then(({createClient})=>{
-      const sb = createClient(supaUrl, supaKey);
-      const myId = getVid();
-
-      const ch = sb.channel('gallery-presence', {
-        config: {
-          presence: { key: myId },
-          // Disable acknowledgements for low latency
-          broadcast: { ack: false, self: false },
-        },
-      });
-      presChannel.current = ch;
-
-      ch.on('presence', {event:'sync'}, ()=>{
-        const state = ch.presenceState();
-        const others = {};
-        let uiList = [];
-        let colorIdx = 0;
-        Object.entries(state).forEach(([key, presences])=>{
-          if(key===myId) return;
-          const p = presences[presences.length-1]; // latest
-          if(!p) return;
-          const existing = visitorsRef.current[key];
-          others[key] = { name:p.name||'زائر', x:p.x||0, z:p.z||21, yaw:p.yaw||0, colorIdx: existing?.colorIdx??colorIdx++ };
-          // Set lerp target (smooth destination)
-          if(!lerpTargets.current[key]) lerpTargets.current[key]={x:p.x||0,z:p.z||21,yaw:p.yaw||0};
-          lerpTargets.current[key].x   = p.x  || 0;
-          lerpTargets.current[key].z   = p.z  || 21;
-          lerpTargets.current[key].yaw = p.yaw|| 0;
-          uiList.push({visitor_id:key, name:others[key].name});
-        });
-        // Remove stale lerp targets
-        Object.keys(lerpTargets.current).forEach(k=>{ if(!others[k]) delete lerpTargets.current[k]; });
-        visitorsRef.current = others;
-        setVisitorsUI(uiList);
-      });
-
-      ch.on('presence',{event:'leave'},({key})=>{
-        const updated = {...visitorsRef.current};
-        delete updated[key]; delete lerpTargets.current[key];
-        visitorsRef.current = updated;
-        setVisitorsUI(Object.entries(updated).map(([id,v])=>({visitor_id:id,name:v.name})));
-      });
-
-      ch.subscribe(async(status)=>{
-        if(status==='SUBSCRIBED'){
-          const s = stateRef.current;
-          await ch.track({ name:visitorName, x:s.pos.x, z:s.pos.z, yaw:s.yaw });
-        }
-      });
-    }).catch(()=>{});
-
-    // ── Throttled position broadcast every 50ms ────────────────
-    const broadcastInterval = setInterval(()=>{
+    // Send MY position (throttled to 100ms min gap)
+    const sendPos = async () => {
       const now = Date.now();
-      if(now - lastBroadcast.current < 50) return;
-      lastBroadcast.current = now;
-      const ch = presChannel.current;
-      if(!ch) return;
+      if(now - lastSend < 100) return;
+      lastSend = now;
       const s = stateRef.current;
-      ch.track({ name:visitorName, x:s.pos.x, z:s.pos.z, yaw:s.yaw }).catch(()=>{});
-    }, 50);
+      try {
+        await fetch('/api/visitors',{
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({visitor_id:myId, name:visitorName,
+            x:+s.pos.x.toFixed(3), z:+s.pos.z.toFixed(3), yaw:+s.yaw.toFixed(4)}),
+        });
+      } catch(e){}
+    };
+
+    // Fetch OTHER visitors (poll every 1s — lerp makes it look smooth)
+    const getOthers = async () => {
+      try {
+        const r = await fetch('/api/visitors');
+        if(!r.ok || !alive) return;
+        const data  = await r.json();
+        const others = (Array.isArray(data)?data:[]).filter(v=>v.visitor_id!==myId);
+
+        // Stable color assignment
+        const activeIds = new Set(others.map(v=>v.visitor_id));
+        others.forEach(v=>{ if(colors[v.visitor_id]===undefined) colors[v.visitor_id]=nextColor++; });
+        Object.keys(colors).forEach(k=>{ if(!activeIds.has(k)) delete colors[k]; });
+
+        // Update LERP targets
+        others.forEach(v=>{
+          const k = v.visitor_id;
+          if(!lerpTargets.current[k]){
+            // New visitor: start them at exact position (no lerp glide from origin)
+            lerpTargets.current[k] = { x:v.x||0, z:v.z||21, yaw:v.yaw||0 };
+          } else {
+            lerpTargets.current[k].x   = v.x   || 0;
+            lerpTargets.current[k].z   = v.z   || 21;
+            lerpTargets.current[k].yaw = v.yaw || 0;
+          }
+        });
+        // Remove departed visitors
+        Object.keys(lerpTargets.current).forEach(k=>{ if(!activeIds.has(k)) delete lerpTargets.current[k]; });
+
+        // visitorsRef: id → {name, colorIdx} — render loop reads this
+        visitorsRef.current = Object.fromEntries(
+          others.map(v=>[v.visitor_id,{name:v.name||'زائر', colorIdx:colors[v.visitor_id]||0}])
+        );
+        setVisitorsUI(others.map(v=>({visitor_id:v.visitor_id, name:v.name||'زائر'})));
+      } catch(e){}
+    };
+
+    sendPos(); getOthers();
+    const t1 = setInterval(sendPos,   100);  // send every 100ms
+    const t2 = setInterval(getOthers, 1000); // poll every 1s
 
     return()=>{
-      clearInterval(broadcastInterval);
-      presChannel.current?.unsubscribe();
-      presChannel.current = null;
-      visitorsRef.current = {};
-      lerpTargets.current = {};
+      alive = false;
+      clearInterval(t1); clearInterval(t2);
+      fetch('/api/visitors',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({visitor_id:myId})}).catch(()=>{});
+      visitorsRef.current = {}; lerpTargets.current = {};
     };
   },[entered,visitorName]);
 
