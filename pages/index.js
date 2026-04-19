@@ -141,10 +141,11 @@ export default function Gallery() {
   const poll=useCallback(async()=>{
     try{
       const r=await fetch('/api/visitors');
-      if(!r.ok) return; // silent - don't update state on error
+      if(!r.ok){setVisitorError(true);return;}
       const d=await r.json();
+      setVisitorError(false);
       setVisitors((Array.isArray(d)?d:[]).filter(v=>v.visitor_id!==getVid()));
-    }catch(e){/* silent */}
+    }catch(e){setVisitorError(true);}
   },[]);
 
   useEffect(()=>{
@@ -408,7 +409,7 @@ export default function Gallery() {
         const mBW=.04,matM=new THREE.MeshStandardMaterial({color:0xf2eee8,roughness:.92});
         [{w:fw+mBW*2,h:mBW,x:0,y:fh/2+mBW/2},{w:fw+mBW*2,h:mBW,x:0,y:-fh/2-mBW/2},{w:mBW,h:fh,x:-fw/2-mBW/2,y:0},{w:mBW,h:fh,x:fw/2+mBW/2,y:0}]
         .forEach(b=>{const m=new THREE.Mesh(new THREE.BoxGeometry(b.w,b.h,.006),matM);m.position.set(b.x,b.y,.072);group.add(m);});
-        // back panel — plain mesh, no Object.assign on position
+        group.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(fw+bw*2+.02,fh+bw*2+.02,.01),M.dark),{position:{z:-.003,set:()=>{}}}).clone?.()|| new THREE.Mesh(new THREE.BoxGeometry(fw+bw*2+.02,fh+bw*2+.02,.01),M.dark));
         // back
         const bk=new THREE.Mesh(new THREE.BoxGeometry(fw+bw*2+.02,fh+bw*2+.02,.01),M.dark);bk.position.z=-.003;group.add(bk);
       };
