@@ -80,3 +80,20 @@ CREATE POLICY "Anyone can update visitors"
 
 CREATE POLICY "Anyone can delete visitors"
   ON visitors FOR DELETE USING (true);
+
+-- ========================================
+-- جدول عداد الزيارات
+-- ========================================
+CREATE TABLE IF NOT EXISTS gallery_visits (
+  id            BIGSERIAL PRIMARY KEY,
+  ip_hash       TEXT NOT NULL,
+  visitor_name  TEXT DEFAULT '',
+  user_agent    TEXT DEFAULT '',
+  visited_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS visits_ip_idx   ON gallery_visits(ip_hash);
+CREATE INDEX IF NOT EXISTS visits_time_idx ON gallery_visits(visited_at DESC);
+
+ALTER TABLE gallery_visits ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Service role manages visits" ON gallery_visits FOR ALL USING (auth.role()='service_role');
+CREATE POLICY "Public can insert visits"    ON gallery_visits FOR INSERT WITH CHECK (true);
