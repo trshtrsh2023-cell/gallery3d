@@ -181,10 +181,10 @@ export default function Gallery() {
   function createAvatar(T,name,ci){
     const col=AVATAR_COLORS[ci%AVATAR_COLORS.length];
     const g=new T.Group();
-    const bM=new T.MeshLambertMaterial({color:col});
-    const hM=new T.MeshLambertMaterial({color:0xfddbb4});
-    const haM=new T.MeshLambertMaterial({color:0x2a1a0a});
-    const lM=new T.MeshLambertMaterial({color:0x1a1a2e});
+    const bM=new T.MeshStandardMaterial({color:col,roughness:.7,metalness:.1});
+    const hM=new T.MeshStandardMaterial({color:0xfddbb4,roughness:.8});
+    const haM=new T.MeshStandardMaterial({color:0x2a1a0a,roughness:.9});
+    const lM=new T.MeshStandardMaterial({color:0x1a1a2e,roughness:.8});
     // Body
     const body=new T.Mesh(new T.CylinderGeometry(.22,.22,.88,14),bM);body.position.y=.64;g.add(body);
     // Shoulders
@@ -235,8 +235,8 @@ export default function Gallery() {
       renderer=new THREE.WebGLRenderer({antialias:true});
       renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
       renderer.setSize(innerWidth,innerHeight);
-      // Shadow maps DISABLED — each shadow map uses 1 texture unit, 12 spotlights = 12 units which exceeds WebGL limit of 16
-      renderer.shadowMap.enabled=false;
+      renderer.shadowMap.enabled=true;
+      renderer.shadowMap.type=THREE.PCFSoftShadowMap;
       // NO tone mapping — pure linear colors look correct
       renderer.toneMapping=THREE.LinearToneMapping;
       renderer.toneMappingExposure=1.0;
@@ -252,25 +252,25 @@ export default function Gallery() {
       const carpetTex=new THREE.CanvasTexture(mkCarpet());
       carpetTex.wrapS=carpetTex.wrapT=THREE.RepeatWrapping;carpetTex.repeat.set(1,4);
 
-      // MeshLambertMaterial uses fewer texture units than MeshStandardMaterial
+      // ── Shared materials (NO per-object texture) ────────────
       const M={
-        wall:   new THREE.MeshLambertMaterial({map:wallTex}),
-        floor:  new THREE.MeshLambertMaterial({map:floorTex}),
-        ceil:   new THREE.MeshLambertMaterial({color:0xddd6cc}),
-        carpet: new THREE.MeshLambertMaterial({map:carpetTex}),
-        mold:   new THREE.MeshLambertMaterial({color:0xc8c0b0}),
-        base:   new THREE.MeshLambertMaterial({color:0xb8b0a0}),
-        track:  new THREE.MeshLambertMaterial({color:0x181820,emissive:0x050508}),
-        cone:   new THREE.MeshLambertMaterial({color:0x0e0e16,emissive:0x030306}),
-        lens:   new THREE.MeshBasicMaterial({color:0xfffce0}),
-        gold:   new THREE.MeshLambertMaterial({color:0xc8a820,emissive:0x201800}),
-        pillar: new THREE.MeshLambertMaterial({color:0xd8d0c4}),
-        wain:   new THREE.MeshLambertMaterial({color:0x1e1c18}),
-        dark:   new THREE.MeshLambertMaterial({color:0x0e0c0a}),
-        brass:  new THREE.MeshLambertMaterial({color:0xb89030,emissive:0x0a0600}),
-        shade:  new THREE.MeshLambertMaterial({color:0x080810}),
-        seat:   new THREE.MeshLambertMaterial({color:0xb89658}),
-        leg:    new THREE.MeshLambertMaterial({color:0x1a1a24}),
+        wall:   new THREE.MeshStandardMaterial({map:wallTex,roughness:.92,metalness:0}),
+        floor:  new THREE.MeshStandardMaterial({map:floorTex,roughness:.5,metalness:.06}),
+        ceil:   new THREE.MeshStandardMaterial({color:0xddd6cc,roughness:.95}),
+        carpet: new THREE.MeshStandardMaterial({map:carpetTex,roughness:.9}),
+        mold:   new THREE.MeshStandardMaterial({color:0xc8c0b0,roughness:.6,metalness:.03}),
+        base:   new THREE.MeshStandardMaterial({color:0xb8b0a0,roughness:.65}),
+        track:  new THREE.MeshStandardMaterial({color:0x181820,roughness:.1,metalness:.97}),
+        cone:   new THREE.MeshStandardMaterial({color:0x0e0e16,roughness:.06,metalness:.98}),
+        lens:   new THREE.MeshStandardMaterial({color:0xfffce0,emissive:0xfffce0,emissiveIntensity:2.4,roughness:0,metalness:0}),
+        gold:   new THREE.MeshStandardMaterial({color:0xc8a820,roughness:.14,metalness:.9}),
+        pillar: new THREE.MeshStandardMaterial({color:0xd8d0c4,roughness:.55,metalness:.04}),
+        wain:   new THREE.MeshStandardMaterial({color:0x1e1c18,roughness:.92}),
+        dark:   new THREE.MeshStandardMaterial({color:0x0e0c0a,roughness:.9}),
+        brass:  new THREE.MeshStandardMaterial({color:0xb89030,roughness:.12,metalness:.93}),
+        shade:  new THREE.MeshStandardMaterial({color:0x080810,roughness:.06,metalness:.97}),
+        seat:   new THREE.MeshStandardMaterial({color:0xb89658,roughness:.62,metalness:.02}),
+        leg:    new THREE.MeshStandardMaterial({color:0x1a1a24,roughness:.12,metalness:.92}),
       };
 
       const box=(w,h,d,mat,px,py,pz)=>{
@@ -331,7 +331,7 @@ export default function Gallery() {
       box(CL,1.1,.18,M.wain,-4,.55,CZ);box(CL,1.1,.18,M.wain,4,.55,CZ);
 
       // FLOOR INLAY BORDER
-      const inM=new THREE.MeshLambertMaterial({color:0x5a5040});
+      const inM=new THREE.MeshStandardMaterial({color:0x5a5040,roughness:.45,metalness:.1});
       box(MHW-1,.015,.1,inM,0,.01,-13.38);box(MHW-1,.015,.1,inM,0,.01,5.88);
       box(.1,.015,MHL-1,inM,-13.38,.01,-.75);box(.1,.015,MHL-1,inM,13.38,.01,-.75);
 
@@ -352,7 +352,7 @@ export default function Gallery() {
             scene.add(g);
             const spot=new THREE.SpotLight(0xfff8f0,2.2,18,Math.PI/7,.22,1.3);
             spot.position.set(rx,h-.52,rz);spot.target.position.set(rx,0,rz);
-            spot.castShadow=false; // shadow maps disabled globally
+            spot.castShadow=true;spot.shadow.mapSize.set(256,256);spot.shadow.bias=-.002;
             scene.add(spot);scene.add(spot.target);
           });
         });
@@ -374,7 +374,7 @@ export default function Gallery() {
       const pL2=new THREE.Mesh(new THREE.BoxGeometry(bw,PH,fd),M.gold);pL2.position.set(-PW/2-bw/2,0,fd/2);pG.add(pL2);
       const pR2=new THREE.Mesh(new THREE.BoxGeometry(bw,PH,fd),M.gold);pR2.position.set(PW/2+bw/2,0,fd/2);pG.add(pR2);
       const pTex=new THREE.CanvasTexture(mkPlaque());
-      const pMesh=new THREE.Mesh(new THREE.PlaneGeometry(PW,PH),new THREE.MeshBasicMaterial({map:pTex}));
+      const pMesh=new THREE.Mesh(new THREE.PlaneGeometry(PW,PH),new THREE.MeshStandardMaterial({map:pTex,roughness:.75}));
       pMesh.position.z=fd+.01;pG.add(pMesh);
       const pBk=new THREE.Mesh(new THREE.BoxGeometry(PW+bw*2+.04,PH+bw*2+.04,.04),M.dark);pBk.position.z=-.01;pG.add(pBk);
       const pLt=new THREE.SpotLight(0xfff5c0,2.0,8,Math.PI/9,.28,1.8);pLt.position.set(0,PH/2+1,2);pLt.target.position.set(0,0,0);pG.add(pLt);pG.add(pLt.target);
@@ -394,18 +394,18 @@ export default function Gallery() {
       const hitGroups=[];
 
       const buildFrame=(group,fw,fh,col)=>{
-        const fMat=new THREE.MeshLambertMaterial({color:col,emissive:new THREE.Color(col).multiplyScalar(.08)});
-        const sMat=new THREE.MeshLambertMaterial({color:Math.max(0,col-0x303030)});
+        const fMat=new THREE.MeshStandardMaterial({color:col,roughness:.5,metalness:.05});
+        const sMat=new THREE.MeshStandardMaterial({color:Math.max(0,col-0x303030),roughness:.68,metalness:.01});
         const mats=[sMat,sMat,sMat,sMat,fMat,sMat];
         const bw=.15,fd=.06;
         [{w:fw+bw*2,h:bw,x:0,y:fh/2+bw/2},{w:fw+bw*2,h:bw,x:0,y:-fh/2-bw/2},{w:bw,h:fh,x:-fw/2-bw/2,y:0},{w:bw,h:fh,x:fw/2+bw/2,y:0}]
         .forEach(b=>{const m=new THREE.Mesh(new THREE.BoxGeometry(b.w,b.h,fd),mats);m.position.set(b.x,b.y,fd/2);m.castShadow=true;group.add(m);});
         // Gap
-        const gM=new THREE.MeshBasicMaterial({color:0x040404});
+        const gM=new THREE.MeshStandardMaterial({color:0x040404,roughness:1});
         [{w:fw+bw*2,h:.01,x:0,y:fh/2},{w:fw+bw*2,h:.01,x:0,y:-fh/2},{w:.01,h:fh,x:-fw/2,y:0},{w:.01,h:fh,x:fw/2,y:0}]
         .forEach(b=>{const m=new THREE.Mesh(new THREE.BoxGeometry(b.w,b.h,.02),gM);m.position.set(b.x,b.y,.08);group.add(m);});
         // Mat
-        const mBW=.04,matM=new THREE.MeshLambertMaterial({color:0xf2eee8});
+        const mBW=.04,matM=new THREE.MeshStandardMaterial({color:0xf2eee8,roughness:.92});
         [{w:fw+mBW*2,h:mBW,x:0,y:fh/2+mBW/2},{w:fw+mBW*2,h:mBW,x:0,y:-fh/2-mBW/2},{w:mBW,h:fh,x:-fw/2-mBW/2,y:0},{w:mBW,h:fh,x:fw/2+mBW/2,y:0}]
         .forEach(b=>{const m=new THREE.Mesh(new THREE.BoxGeometry(b.w,b.h,.006),matM);m.position.set(b.x,b.y,.072);group.add(m);});
         // back panel — plain mesh, no Object.assign on position
@@ -414,7 +414,7 @@ export default function Gallery() {
       };
 
       const addPicLight=(group,fw,fh,lit)=>{
-        const glM=new THREE.MeshBasicMaterial({color:lit?0xfff8e0:0x444438});
+        const glM=new THREE.MeshStandardMaterial({color:0xfff8e0,emissive:0xfff8e0,emissiveIntensity:lit?1.8:.06,roughness:0,metalness:0});
         const g=new THREE.Group();g.position.set(0,fh/2+.2,.12);
         g.add(new THREE.Mesh(new THREE.BoxGeometry(fw*.44,.048,.036),M.brass));
         const arm=new THREE.Mesh(new THREE.CylinderGeometry(.009,.009,.14,8),M.brass);arm.rotation.x=Math.PI/2;arm.position.z=.07;g.add(arm);
@@ -451,7 +451,7 @@ export default function Gallery() {
         await new Promise(resolve=>{
           const finish=(fw,fh,tex,hasPhoto)=>{
             buildFrame(group,fw,fh,FRAME_COLORS[slot.id%FRAME_COLORS.length]);
-            const img=new THREE.Mesh(new THREE.PlaneGeometry(fw,fh),new THREE.MeshBasicMaterial({map:tex}));
+            const img=new THREE.Mesh(new THREE.PlaneGeometry(fw,fh),new THREE.MeshStandardMaterial({map:tex,roughness:.82}));
             img.position.z=.066;group.add(img);
             addPicLight(group,fw,fh,hasPhoto);
             addLabel(group,slot.id,fh,hasPhoto);
