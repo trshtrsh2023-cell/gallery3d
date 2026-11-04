@@ -4,7 +4,6 @@ import Head from 'next/head';
 export default function Home() {
   const [photos, setPhotos] = useState([]);
 
-  // جلب الصور من قاعدة البيانات مع نظام احتياطي Fallback في حال حدوث خطأ 500
   useEffect(() => {
     fetch('/api/photos')
       .then((res) => {
@@ -59,7 +58,7 @@ export default function Home() {
     function initGallery(activePhotos) {
       'use strict';
       const EYE_HEIGHT = 1.6;
-      const SHOW_DIST = 2.5;
+      const SHOW_DIST = 3.0; // مسافة أكبر قليلاً لضمان ظهور لوحة المعلومات عند الاقتراب
 
       const SLOTS = [
         { pos: [-4.6, EYE_HEIGHT, -10], rotY: Math.PI / 2 },
@@ -105,7 +104,7 @@ export default function Home() {
 
       const state = {
         yaw: 0, pitch: 0,
-        move: { forward: 0, backward: 0, left: 0, right: 0 },
+        keys: { w: false, s: false, a: false, d: false },
         joy: { a: false, id: null, cx: 0, cy: 0, dx: 0, dy: 0 },
         look: { a: false, id: null, lx: 0, ly: 0 },
         mouseLook: false,
@@ -197,35 +196,23 @@ export default function Home() {
         });
       });
 
-      // --- تحكم لوحة المفاتيح (الكمبيوتر: WASD / الأسهم) ---
+      // --- التحكم بلوحة المفاتيح (WASD والأسهم) ---
       window.addEventListener('keydown', (e) => {
         if (fullscreenOpen) return;
-        switch (e.code) {
-          case 'ArrowUp':
-          case 'KeyW': state.move.forward = 1; break;
-          case 'ArrowDown':
-          case 'KeyS': state.move.backward = 1; break;
-          case 'ArrowLeft':
-          case 'KeyA': state.move.left = 1; break;
-          case 'ArrowRight':
-          case 'KeyD': state.move.right = 1; break;
-        }
+        if (e.code === 'KeyW' || e.code === 'ArrowUp') state.keys.w = true;
+        if (e.code === 'KeyS' || e.code === 'ArrowDown') state.keys.s = true;
+        if (e.code === 'KeyA' || e.code === 'ArrowLeft') state.keys.a = true;
+        if (e.code === 'KeyD' || e.code === 'ArrowRight') state.keys.d = true;
       });
 
       window.addEventListener('keyup', (e) => {
-        switch (e.code) {
-          case 'ArrowUp':
-          case 'KeyW': state.move.forward = 0; break;
-          case 'ArrowDown':
-          case 'KeyS': state.move.backward = 0; break;
-          case 'ArrowLeft':
-          case 'KeyA': state.move.left = 0; break;
-          case 'ArrowRight':
-          case 'KeyD': state.move.right = 0; break;
-        }
+        if (e.code === 'KeyW' || e.code === 'ArrowUp') state.keys.w = false;
+        if (e.code === 'KeyS' || e.code === 'ArrowDown') state.keys.s = false;
+        if (e.code === 'KeyA' || e.code === 'ArrowLeft') state.keys.a = false;
+        if (e.code === 'KeyD' || e.code === 'ArrowRight') state.keys.d = false;
       });
 
-      // --- تحكم الماوس للنظر والتجول والضغط على الصور ---
+      // --- تحكم الماوس للنظر ---
       renderer.domElement.addEventListener('mousedown', (e) => {
         if (fullscreenOpen) return;
         state.mouseLook = true;
@@ -316,7 +303,6 @@ export default function Home() {
         }
       });
 
-      // الضغط بالماوس لتكبير الصورة
       renderer.domElement.addEventListener('click', (e) => {
         triggerRaycast(e.clientX, e.clientY);
       });
@@ -361,27 +347,30 @@ export default function Home() {
         camera.rotation.x = state.pitch;
 
         if (!fullscreenOpen) {
-          // حركة الجوستستيك للجوال
+          // سرعة حركة بطيئة ومريحة (0.03 بدلاً من السرعات السابقة العالية)
+          const speed = 0.035;
+          const v = new window.THREE.Vector3();
+
+          if (state.keys.w) v.z -= 1;
+          if (state.keys.s) v.z += 1;
+          if (state.keys.a) v.x -= 1;
+          if (state.keys.d) v.x += 1;
+
+          if (v.lengthSq() > 0) {
+            v.normalize();
+            v.applyAxisAngle(new window.THREE.Vector3(0, 1, 0), state.yaw);
+            camera.position.addScaledVector(v, speed);
+          }
+
+          // حركة الجوستستيك للجوال (بسرعة بطيئة متوازنة)
           if (state.joy.a) {
-            const dir = new window.THREE.Vector3(state.joy.dx, 0, state.joy.dy).applyQuaternion(camera.quaternion);
-            dir.y = 0;
-            if (dir.lengthSq() > 0) dir.normalize();
-            camera.position.add(dir.multiplyScalar(0.08));
+            const joyDir = new window.THREE.Vector3(state.joy.dx, 0, state.joy.dy).applyQuaternion(camera.quaternion);
+            joyDir.y = 0;
+            if (joyDir.lengthSq() > 0) joyDir.normalize();
+            camera.position.addScaledVector(joyDir, 0.04);
           }
 
-          // حركة لوحة المفاتيح للكمبيوتر (WASD / الأسهم)
-          const moveDir = new window.THREE.Vector3(
-            (state.move.right - state.move.left),
-            0,
-            (state.move.backward - state.move.forward)
-          );
-          if (moveDir.lengthSq() > 0) {
-            moveDir.applyAxisAngle(new window.THREE.Vector3(0, 1, 0), state.yaw);
-            moveDir.normalize();
-            camera.position.add(moveDir.multiplyScalar(0.09));
-          }
-
-          // حدود الحركة داخل الغرفة الافتراضية لمنع الخروج عن الجدران
+          // حدود الغرفة الافتراضية
           camera.position.x = Math.max(-9, Math.min(9, camera.position.x));
           camera.position.z = Math.max(-14, Math.min(14, camera.position.z));
 
@@ -462,7 +451,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* لوحة معلومات الصورة */}
+      {/* لوحة معلومات الصورة على اليمين */}
       <div className="info-glass" id="infoGlass" onClick={handleToggleGlass} style={{ position: 'fixed', top: '50%', right: '20px', transform: 'translateY(-50%)', width: '270px', borderRadius: '16px', background: 'rgba(255, 255, 255, 0.08)', backdropFilter: 'blur(16px)', padding: '16px', zIndex: 250, color: '#f3efe8', opacity: 0, pointerEvents: 'none', transition: 'opacity .4s ease' }}>
         <div className="info-hint" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
           <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#c9a35b' }}></span>
@@ -497,7 +486,7 @@ export default function Home() {
       </div>
 
       <div id="lookHintMobile" style={{ position: 'fixed', right: '20px', bottom: '26px', zIndex: 300, display: 'none', color: 'rgba(255, 255, 255, .7)', fontSize: '12px', background: 'rgba(0, 0, 0, .5)', padding: '8px 12px', borderRadius: '8px', pointerEvents: 'none' }}>
-        استخدم WASD أو الأسهم للتجول • اسحب بالماوس أو اللمس للنظر • انقر اللوحة للتكبير
+        استخدم WASD أو الأسهم للتجول • اسحب بالماوس للنظر • انقر اللوحة للتكبير
       </div>
     </>
   );
