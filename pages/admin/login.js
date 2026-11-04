@@ -42,34 +42,24 @@ export default function AdminLogin() {
         <title>دخول الإدارة — معرض الفوتوغرافيا الافتراضي</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
-      <form onSubmit={handleSubmit} style={styles.box}>
-        <div style={styles.mark}>✦</div>
-        <h1 style={styles.title}>دخول الإدارة</h1>
-        <p style={styles.sub}>معرض الفوتوغرافيا الافتراضي — جمعية الثقافة والفنون بالطائف</p>
-
         <input
-          style={styles.input}
-          placeholder="اسم المستخدم"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoFocus
-        />
-        <input
-          style={styles.input}
-          placeholder="كلمة المرور"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-
-        {error && <div style={styles.error}>{error}</div>}
-
-        <button type="submit" style={styles.btn} disabled={loading}>
-          {loading ? 'جاري الدخول…' : 'دخول'}
-        </button>
-
-        <a href="/" style={styles.back}>↩ العودة للمعرض</a>
-      </form>
+                  style={styles.input}
+                  placeholder="اسم المستخدم"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  id="username"
+                  name="username"
+                  autoFocus
+                />
+                <input
+                  style={styles.input}
+                  placeholder="كلمة المرور"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  id="password"
+                  name="password"
+                />
     </div>
   );
 }
