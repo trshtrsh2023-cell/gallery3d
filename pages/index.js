@@ -558,7 +558,7 @@ export default function Home() {
           transition: opacity .5s ease, visibility .5s, -webkit-backdrop-filter .5s ease, backdrop-filter .5s ease;
         }
         #fsOverlay.open { opacity: 1; visibility: visible; pointer-events: auto; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
-        #fsImg { transform: scale(.8); filter: blur(22px); transition: transform .55s cubic-bezier(.19,1,.22,1), filter .55s ease; }
+        #fsImg { transform: scale(.6); filter: blur(30px); transition: transform .70s cubic-bezier(.19,1,.22,1), filter .55s ease; }
         #fsOverlay.open #fsImg { transform: scale(1); filter: blur(0); }
         #fsCaption { opacity: 0; transform: translateY(10px); transition: opacity .5s ease .1s, transform .5s ease .1s; }
         #fsOverlay.open #fsCaption { opacity: 1; transform: translateY(0); }
