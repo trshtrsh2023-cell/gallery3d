@@ -12,7 +12,7 @@ export default async function handler(req, res) {
 
     const { data, error } = await supabase
       .from('photos')
-      .select('id, title, photographer, camera, year, location, image_url')
+      .select('id, title, photographer, camera, year, location, image_url, slot_index')
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true });
 

@@ -20,7 +20,8 @@ export default function Home() {
             ph: p.photographer || 'مصور المعرض',
             cam: p.camera || 'Canon EOS R5',
             yr: p.year || '2025',
-            loc: p.location || 'الطائف'
+            loc: p.location || 'الطائف',
+            slot: p.slot_index || null
           }));
           setPhotos(formattedPhotos);
         } else {
@@ -68,7 +69,8 @@ export default function Home() {
     function initGallery(activePhotos) {
       'use strict';
       const EYE_HEIGHT = 1.6;
-      const SHOW_DIST = 3.5;
+      const SHOW_DIST = 3.5;   // مسافة ظهور لوحة المعلومات الزجاجية
+      const OPEN_DIST = 2.0;   // مسافة السماح بفتح الصورة بالتكبير (مترين)
 
       const SLOTS = [
         { pos: [-4.6, EYE_HEIGHT, -10], rotY: Math.PI / 2 },
@@ -171,8 +173,20 @@ export default function Home() {
 
       const loader = new window.THREE.TextureLoader();
 
-      activePhotos.forEach((ph, i) => {
-        const slot = SLOTS[i];
+      // توزيع اللوحات على المواقع: إن حدّد الأدمن "slot" (رقم موقع من ١ إلى
+      // ١١) تُعرض اللوحة في ذلك الموقع بالضبط، وإلا تُرتَّب تلقائياً بالترتيب
+      const usedSlotIdx = new Set();
+      activePhotos.forEach((ph) => { if (ph.slot) usedSlotIdx.add(ph.slot - 1); });
+      let autoCursor = 0;
+      function nextFreeSlot() {
+        while (usedSlotIdx.has(autoCursor)) autoCursor++;
+        usedSlotIdx.add(autoCursor);
+        return autoCursor;
+      }
+
+      activePhotos.forEach((ph) => {
+        const slotIdx = (ph.slot && ph.slot >= 1) ? ph.slot - 1 : nextFreeSlot();
+        const slot = SLOTS[slotIdx];
         if (!slot) return;
         const g = new window.THREE.Group();
         g.position.set(slot.pos[0], EYE_HEIGHT, slot.pos[2]);
@@ -265,7 +279,11 @@ export default function Home() {
 
       function onTouchStart(e) {
         for (const t of e.changedTouches) {
-          if (t.clientX < window.innerWidth * 0.45 && !state.joy.a) {
+          // منطقة الجويستيك الفعلية فقط (الربع السفلي الأيسر من الشاشة، حيث
+          // تظهر دائرة التحكم)، وليس كل الجهة اليسرى من الشاشة — هذا هو
+          // الإصلاح لمشكلة تفعّل الجويستيك من منتصف الشاشة
+          const isNearJoystick = t.clientX < window.innerWidth * 0.5 && t.clientY > window.innerHeight * 0.55;
+          if (isNearJoystick && !state.joy.a) {
             state.joy.a = true;
             state.joy.id = t.identifier;
             if (joyZone) {
@@ -328,15 +346,31 @@ export default function Home() {
       renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: true });
       renderer.domElement.addEventListener('touchend', onTouchEnd);
 
+      function showTooFarHint() {
+        const el = document.getElementById('tooFarToast');
+        if (!el) return;
+        el.classList.add('show');
+        clearTimeout(showTooFarHint._t);
+        showTooFarHint._t = setTimeout(() => el.classList.remove('show'), 1400);
+      }
+
       function triggerRaycast(clientX, clientY) {
         const ray = new window.THREE.Raycaster();
         const ndc = new window.THREE.Vector2((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
         ray.setFromCamera(ndc, camera);
         const hits = ray.intersectObjects(hitGroups, true);
         if (hits.length) {
-          let o = hits[0].object;
+          const hit = hits[0];
+          let o = hit.object;
           while (o && !o.userData.title) o = o.parent;
-          if (o && o.userData.title) openFS(o.userData);
+          if (o && o.userData.title) {
+            // لا تفتح الصورة إلا إذا كان الزائر قريباً منها فعلياً (مترين أو أقل)
+            if (hit.distance > OPEN_DIST) {
+              showTooFarHint();
+              return;
+            }
+            openFS(o.userData);
+          }
         }
       }
 
@@ -519,26 +553,81 @@ export default function Home() {
           70% { box-shadow: 0 0 0 8px rgba(201,163,91,0); }
           100% { box-shadow: 0 0 0 0 rgba(201,163,91,0); }
         }
-        #fsOverlay.open { display: flex !important; }
+        #fsOverlay {
+          opacity: 0; visibility: hidden; pointer-events: none;
+          transition: opacity .5s ease, visibility .5s, -webkit-backdrop-filter .5s ease, backdrop-filter .5s ease;
+        }
+        #fsOverlay.open { opacity: 1; visibility: visible; pointer-events: auto; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+        #fsImg { transform: scale(.8); filter: blur(22px); transition: transform .55s cubic-bezier(.19,1,.22,1), filter .55s ease; }
+        #fsOverlay.open #fsImg { transform: scale(1); filter: blur(0); }
+        #fsCaption { opacity: 0; transform: translateY(10px); transition: opacity .5s ease .1s, transform .5s ease .1s; }
+        #fsOverlay.open #fsCaption { opacity: 1; transform: translateY(0); }
         #fsBackBtn:active { filter: brightness(1.15); }
-        #entryNameInput { width: 100%; padding: 12px 14px; margin-bottom: 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,.18); background: rgba(0,0,0,.3); color: #f3efe8; font-size: 14px; outline: none; text-align: center; font-family: inherit; }
-        #entryNameInput::placeholder { color: #8f887c; }
-        #adminCornerLink { position: fixed; top: 14px; left: 14px; z-index: 1100; color: rgba(243,239,232,.55); font-size: 12px; text-decoration: none; letter-spacing: .03em; padding: 6px 10px; border-radius: 20px; transition: color .2s ease, background .2s ease; }
-        #adminCornerLink:hover { color: #c9a35b; background: rgba(255,255,255,.06); }
+
+        #tooFarToast {
+          position: fixed; top: 46%; left: 50%; transform: translate(-50%, -50%) scale(.92);
+          background: rgba(15,12,10,.92); border: 1px solid rgba(201,163,91,.4); color: #f3efe8;
+          padding: 10px 22px; border-radius: 30px; font-size: 13px; z-index: 900;
+          opacity: 0; pointer-events: none; transition: opacity .25s ease, transform .25s ease;
+        }
+        #tooFarToast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+        #entryNameInput { width: 100%; padding: 13px 16px; margin-bottom: 14px; border-radius: 10px; border: 1px solid rgba(201,163,91,.22); background: rgba(0,0,0,.32); color: #f3efe8; font-size: 14px; outline: none; text-align: center; font-family: inherit; transition: border-color .2s ease; }
+        #entryNameInput:focus { border-color: rgba(201,163,91,.65); }
+        #entryNameInput::placeholder { color: #776f62; }
+
+        #adminCornerLink {
+          position: fixed; top: 16px; left: 16px; z-index: 1100; display: flex; align-items: center; gap: 6px;
+          color: rgba(243,239,232,.5); font-size: 11.5px; text-decoration: none; letter-spacing: .02em;
+          padding: 7px 12px 7px 9px; border-radius: 20px; border: 1px solid rgba(255,255,255,.08);
+          transition: color .2s ease, background .2s ease, border-color .2s ease;
+        }
+        #adminCornerLink:hover { color: #c9a35b; background: rgba(255,255,255,.05); border-color: rgba(201,163,91,.3); }
+
+        .entry-aperture { animation: aperture-spin 26s linear infinite; }
+        @keyframes aperture-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
 
-      <a id="adminCornerLink" href="/admin/login">دخول الأدارة للمعرض</a>
+      <a id="adminCornerLink" href="/admin/login">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" />
+          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+        دخول الأدارة للمعرض
+      </a>
 
       <div id="canvasHost" style={{ position: 'fixed', inset: 0, touchAction: 'none' }}></div>
 
       {/* واجهة الدخول: اسم الزائر ثم زر دخول المعرض */}
-      <div id="entryOverlay" style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'radial-gradient(circle at 50% 30%, #201b17 0%, #080706 70%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#eee' }}>
-        <div style={{ textAlign: 'center', padding: '40px 36px', width: 'min(90vw, 420px)' }}>
-          <div style={{ fontSize: '42px', color: '#c9a35b', marginBottom: '6px' }}>✦</div>
-          <h1 style={{ fontSize: '22px', letterSpacing: '.25em', fontWeight: 300, color: '#f3efe8', marginBottom: '10px' }}>MODERN GALLERY</h1>
-          <p style={{ color: '#9a9388', fontSize: '14px', lineHeight: 1.8, marginBottom: '24px' }}>
-            معرض الفوتوغرافيا الافتراضي الحديث <br />جمعية الثقافة والفنون بالطائف
+      <div id="entryOverlay" style={{ position: 'fixed', inset: 0, zIndex: 1000, overflow: 'hidden', background: 'radial-gradient(circle at 50% 28%, #211c17 0%, #0a0806 72%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#eee' }}>
+
+        {/* خط جبال الهدا/الشفا — لمسة من طبيعة الطائف */}
+        <svg viewBox="0 0 1200 220" preserveAspectRatio="none" style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '22vh', opacity: 0.4, pointerEvents: 'none' }}>
+          <path d="M0,220 L0,150 L110,95 L200,140 L320,55 L430,125 L560,30 L680,115 L790,65 L900,135 L1030,60 L1140,120 L1200,80 L1200,220 Z" fill="none" stroke="#c9a35b" strokeWidth="1.1" />
+          <path d="M0,220 L0,180 L150,140 L280,175 L420,120 L570,170 L720,110 L860,165 L1000,115 L1200,160 L1200,220 Z" fill="none" stroke="#8a6e3f" strokeWidth="0.8" opacity="0.6" />
+        </svg>
+
+        <div style={{ position: 'relative', textAlign: 'center', padding: '40px 36px', width: 'min(90vw, 440px)' }}>
+          <svg className="entry-aperture" width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="#c9a35b" strokeWidth="1.2" style={{ margin: '0 auto 14px' }}>
+            <circle cx="12" cy="12" r="10" />
+            <line x1="14.31" y1="8" x2="20.05" y2="17.94" />
+            <line x1="9.69" y1="8" x2="21.17" y2="8" />
+            <line x1="7.38" y1="12" x2="13.12" y2="2.06" />
+            <line x1="9.69" y1="16" x2="3.95" y2="6.06" />
+            <line x1="14.31" y1="16" x2="2.83" y2="16" />
+            <line x1="16.62" y1="12" x2="10.88" y2="21.94" />
+          </svg>
+
+          <h1 style={{ fontSize: '28px', letterSpacing: '.04em', fontWeight: 500, color: '#f3efe8', marginBottom: '4px', fontFamily: "'Georgia', 'Times New Roman', serif" }}>عدسة الطائف</h1>
+          <div style={{ fontSize: '11px', letterSpacing: '.38em', color: '#8a7a56', marginBottom: '16px', fontFamily: "Georgia, serif" }}>TAIF&nbsp;PHOTOGRAPHY&nbsp;GALLERY</div>
+
+          <p style={{ color: '#9a9388', fontSize: '13.5px', lineHeight: 1.9, marginBottom: '6px' }}>
+            معرض الفوتوغرافيا الافتراضي — جمعية الثقافة والفنون بالطائف
           </p>
+          <div style={{ color: '#5f5848', fontSize: '10.5px', letterSpacing: '.12em', marginBottom: '26px', fontFamily: 'monospace' }}>
+            F/2.8 — 1/125s — ISO 100
+          </div>
+
           <input
             id="entryNameInput"
             placeholder="اكتب اسمك هنا..."
@@ -546,11 +635,17 @@ export default function Home() {
             onChange={(e) => setVisitorName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleEnter()}
           />
-          <button onClick={handleEnter} disabled={entering} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #c9a35b, #9c7a3c)', color: '#1a1408', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 600, cursor: 'pointer' }}>
-            {entering ? '...جاري الدخول' : 'دخول المعرض ←'}
+          <button onClick={handleEnter} disabled={entering} style={{ width: '100%', padding: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, #c9a35b, #9c7a3c)', color: '#1a1408', border: 'none', borderRadius: '9px', fontSize: '15.5px', fontWeight: 600, cursor: 'pointer' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a1408" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+            {entering ? '...جاري الدخول' : 'دخول المعرض'}
           </button>
         </div>
       </div>
+
+      <div id="tooFarToast">اقترب أكثر من اللوحة لعرضها (مترين تقريباً)</div>
 
       {/* لوحة معلومات الصورة على اليمين */}
       <div className="info-glass" id="infoGlass" onClick={handleToggleGlass} style={{ position: 'fixed', top: '50%', right: '20px', transform: 'translateY(-50%)', width: '270px', maxWidth: '65vw', borderRadius: '16px', background: 'rgba(255, 255, 255, 0.08)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', padding: '16px', zIndex: 250, color: '#f3efe8', opacity: 0, pointerEvents: 'none', transition: 'opacity .4s ease, background .3s ease' }}>
@@ -567,13 +662,13 @@ export default function Home() {
         </div>
       </div>
 
-      {/* شاشة العرض الكامل للصورة */}
-      <div className="fs-overlay" id="fsOverlay" style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0, 0, 0, .94)', display: 'none', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: '20px' }}>
+      {/* شاشة العرض الكامل للصورة — دخول وخروج بتأثير زوم + بلور */}
+      <div className="fs-overlay" id="fsOverlay" style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0, 0, 0, .94)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: '20px' }}>
         <button id="fsBackBtn" style={{ position: 'fixed', top: '20px', right: '20px', zIndex: 2100, background: 'rgba(201, 163, 91, .25)', color: '#f3efe8', border: '1px solid rgba(201, 163, 91, .5)', padding: '10px 20px', borderRadius: '30px', cursor: 'pointer' }}>
           ↩ رجوع للمعرض
         </button>
         <img id="fsImg" src="" alt="" style={{ maxWidth: '90vw', maxHeight: '75vh', objectFit: 'contain', borderRadius: '4px' }} />
-        <div style={{ textAlign: 'center', marginTop: '16px', color: '#f3efe8' }}>
+        <div id="fsCaption" style={{ textAlign: 'center', marginTop: '16px', color: '#f3efe8' }}>
           <h2 id="fsTitle" style={{ fontSize: '19px', color: '#c9a35b', marginBottom: '4px' }}></h2>
           <p id="fsMeta" style={{ fontSize: '13px', color: '#a79f8f' }}></p>
         </div>

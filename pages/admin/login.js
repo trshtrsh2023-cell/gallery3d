@@ -43,7 +43,15 @@ export default function AdminLogin() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
       <form onSubmit={handleSubmit} style={styles.box}>
-        <div style={styles.mark}>✦</div>
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#c9a35b" strokeWidth="1.2" style={{ margin: '0 auto 10px' }}>
+          <circle cx="12" cy="12" r="10" />
+          <line x1="14.31" y1="8" x2="20.05" y2="17.94" />
+          <line x1="9.69" y1="8" x2="21.17" y2="8" />
+          <line x1="7.38" y1="12" x2="13.12" y2="2.06" />
+          <line x1="9.69" y1="16" x2="3.95" y2="6.06" />
+          <line x1="14.31" y1="16" x2="2.83" y2="16" />
+          <line x1="16.62" y1="12" x2="10.88" y2="21.94" />
+        </svg>
         <h1 style={styles.title}>دخول الإدارة</h1>
         <p style={styles.sub}>معرض الفوتوغرافيا الافتراضي — جمعية الثقافة والفنون بالطائف</p>
 
@@ -69,6 +77,7 @@ export default function AdminLogin() {
         </button>
 
         <a href="/" style={styles.back}>↩ العودة للمعرض</a>
+        <a href="/admin/setup" style={{ ...styles.back, marginTop: '6px' }}>مشكلة في الدخول؟ إعداد / تشخيص الحساب</a>
       </form>
     </div>
   );

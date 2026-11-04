@@ -2,6 +2,7 @@
 -- إعداد قاعدة بيانات معرض الفوتوغرافيا الافتراضي
 -- جمعية الثقافة والفنون بالطائف
 -- نفّذ هذا الملف كاملاً في Supabase → SQL Editor
+-- (آمن لإعادة التشغيل أكثر من مرة — يستخدم if not exists / if not exists لكل عمود)
 -- ============================================================
 
 -- جدول اللوحات / الصور المعروضة في المعرض
@@ -14,9 +15,13 @@ create table if not exists photos (
   location text,
   image_url text not null,
   storage_path text,
+  slot_index int,            -- رقم موقع اللوحة داخل الصالة (1 إلى 11)
   sort_order int default 0,
   created_at timestamptz default now()
 );
+
+-- في حال كان الجدول منشأً مسبقاً بدون عمود slot_index
+alter table photos add column if not exists slot_index int;
 
 -- جدول سجل زيارات المعرض (كل دخول زائر يسجَّل هنا)
 create table if not exists visits (
@@ -36,7 +41,7 @@ create table if not exists admins (
 );
 
 -- تفعيل RLS: الوصول الفعلي يتم فقط من خادم Next.js عبر مفتاح service_role
--- (الذي يتجاوز RLS تلقائياً)، لذا نمنع أي وصول مباشر من المتصفح
+-- (الذي يتجاوز RLS تلقائياً)، لذا نمنع أي وصول مباشر من المتصفح بغير ذلك
 alter table photos enable row level security;
 alter table visits enable row level security;
 alter table admins enable row level security;
@@ -46,17 +51,20 @@ drop policy if exists "public read photos" on photos;
 create policy "public read photos" on photos for select using (true);
 
 -- ============================================================
--- دلو التخزين لصور المعرض (نفّذه مرة واحدة من Storage → New bucket
--- باسم gallery-photos واجعله Public، أو شغّل السطر التالي إن كانت
--- صلاحياتك تسمح بذلك من SQL Editor)
+-- دلو التخزين لصور المعرض — من لوحة Supabase: Storage → New bucket
+-- باسم gallery-photos بالضبط، واجعله Public. (أو شغّل السطر التالي
+-- إن كانت صلاحيات حسابك تسمح بإنشاء bucket من SQL Editor مباشرة)
 -- insert into storage.buckets (id, name, public) values ('gallery-photos','gallery-photos', true)
 -- on conflict (id) do nothing;
 -- ============================================================
 
 -- ============================================================
--- لإنشاء أول حساب أدمن: لا تضع كلمة المرور نصاً صريحاً هنا.
--- شغّل الأمر التالي محلياً لتوليد password_hash:
---   node -e "console.log(require('bcryptjs').hashSync('كلمة_المرور_هنا', 10))"
--- ثم أدرج الناتج هنا:
+-- إنشاء أول حساب أدمن — لا حاجة لتوليد bcrypt يدوياً بعد الآن:
+-- افتح صفحة /admin/setup في الموقع بعد نشره وأنشئ الحساب من هناك
+-- (يتطلب ADMIN_SETUP_SECRET من متغيرات البيئة). راجع README.md.
+--
+-- أو بديل يدوي مباشر من SQL Editor إن رغبت:
+--   1) شغّل محلياً: node -e "console.log(require('bcryptjs').hashSync('كلمة_المرور', 10))"
+--   2) الصق الناتج هنا:
 -- insert into admins (username, password_hash) values ('admin', 'الهاش_الناتج_هنا');
 -- ============================================================

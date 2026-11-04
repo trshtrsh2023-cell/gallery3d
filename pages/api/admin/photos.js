@@ -26,10 +26,10 @@ export default async function handler(req, res) {
   }
 
   // ---- POST: رفع صورة جديدة ----
-  // body: { fileBase64: "data:image/jpeg;base64,....", fileName, title, photographer, camera, year, location }
+  // body: { fileBase64: "data:image/jpeg;base64,....", fileName, title, photographer, camera, year, location, slot_index }
   if (req.method === 'POST') {
     try {
-      const { fileBase64, fileName, title, photographer, camera, year, location } = req.body || {};
+      const { fileBase64, fileName, title, photographer, camera, year, location, slot_index } = req.body || {};
       if (!fileBase64 || !fileName) return res.status(400).json({ error: 'الملف مفقود' });
 
       const match = fileBase64.match(/^data:(.+);base64,(.+)$/);
@@ -61,6 +61,7 @@ export default async function handler(req, res) {
           location: location || null,
           image_url,
           storage_path: storagePath,
+          slot_index: slot_index ? Number(slot_index) : null,
           sort_order: nextOrder
         }])
         .select()
@@ -71,6 +72,29 @@ export default async function handler(req, res) {
     } catch (e) {
       console.error('photo upload crashed:', e);
       return res.status(500).json({ error: 'خطأ غير متوقع أثناء الرفع' });
+    }
+  }
+
+  // ---- PATCH: تعديل بيانات لوحة موجودة أو موقعها داخل الصالة ----
+  // body: { id, title, photographer, camera, year, location, slot_index }
+  if (req.method === 'PATCH') {
+    try {
+      const { id, title, photographer, camera, year, location, slot_index } = req.body || {};
+      if (!id) return res.status(400).json({ error: 'المعرّف مفقود' });
+      const patch = {};
+      if (title !== undefined) patch.title = title;
+      if (photographer !== undefined) patch.photographer = photographer;
+      if (camera !== undefined) patch.camera = camera;
+      if (year !== undefined) patch.year = year;
+      if (location !== undefined) patch.location = location;
+      if (slot_index !== undefined) patch.slot_index = slot_index ? Number(slot_index) : null;
+
+      const { data, error } = await supabase.from('photos').update(patch).eq('id', id).select().single();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json(data);
+    } catch (e) {
+      console.error('photo patch crashed:', e);
+      return res.status(500).json({ error: 'تعذّر حفظ التعديل' });
     }
   }
 
