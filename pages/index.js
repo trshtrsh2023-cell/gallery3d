@@ -4,13 +4,15 @@ import Head from 'next/head';
 export default function Home() {
   const [photos, setPhotos] = useState([]);
 
-  // جلب الصور الحقيقية من قاعدة بيانات المشروع عند تحميل الصفحة
+  // جلب الصور من قاعدة البيانات مع نظام احتياطي Fallback في حال حدوث خطأ 500
   useEffect(() => {
     fetch('/api/photos')
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error('فشل جلب الصور من الخادم');
+        return res.json();
+      })
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          // تحويل البيانات لتوافق هيكل المعرض الافتراضي
           const formattedPhotos = data.map((p) => ({
             title: p.title || 'لوحة فنية',
             url: p.image_url || p.url,
@@ -20,15 +22,30 @@ export default function Home() {
             loc: p.location || 'الطائف'
           }));
           setPhotos(formattedPhotos);
+        } else {
+          useDefaultPhotos();
         }
       })
-      .catch((err) => console.log('خطأ في جلب الصور:', err));
+      .catch((err) => {
+        console.log('استخدام الصور الافتراضية لخطأ في الـ API:', err);
+        useDefaultPhotos();
+      });
+
+    function useDefaultPhotos() {
+      setPhotos([
+        { title: 'غروب الطائف', url: 'https://picsum.photos/seed/taif1/900/600', ph: 'أنور محمد', cam: 'Canon EOS R5', yr: '2025', loc: 'الشفا' },
+        { title: 'شفا الطائف', url: 'https://picsum.photos/seed/taif2/900/600', ph: 'عدنان الخمري', cam: 'Sony A7IV', yr: '2025', loc: 'الطائف' },
+        { title: 'ورود الطائف', url: 'https://picsum.photos/seed/taif3/900/600', ph: 'أنور محمد', cam: 'Canon EOS R5', yr: '2024', loc: 'الهدا' },
+        { title: 'التراث القديم', url: 'https://picsum.photos/seed/taif4/900/600', ph: 'فيصل الخديدي', cam: 'Nikon Z8', yr: '2025', loc: 'البلد' },
+        { title: 'جبال الهدا', url: 'https://picsum.photos/seed/taif5/900/600', ph: 'أنور محمد', cam: 'Canon EOS R5', yr: '2024', loc: 'الهدا' },
+        { title: 'ليالي الطائف', url: 'https://picsum.photos/seed/taif6/900/600', ph: 'عدنان الخمري', cam: 'Sony A7IV', yr: '2025', loc: 'الطائف' }
+      ]);
+    }
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || photos.length === 0) return;
 
-    // تحميل مكتبة Three.js إذا لم تكن محملة
     if (!window.THREE) {
       const script = document.createElement('script');
       script.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
@@ -39,17 +56,11 @@ export default function Home() {
       initGallery(photos);
     }
 
-    function initGallery(dynamicPhotos) {
-      // استخدام الصور القادمة من قاعدة البيانات أو الصور الافتراضية في حال عدم وجود صور
-      const PHOTOS = dynamicPhotos.length > 0 ? dynamicPhotos : [
-        { title: 'غروب الطائف', url: 'https://picsum.photos/seed/taif1/900/600', ph: 'أنور محمد', cam: 'Canon EOS R5', yr: '2025', loc: 'الشفا' },
-        { title: 'شفا الطائف', url: 'https://picsum.photos/seed/taif2/900/600', ph: 'عدنان الخمري', cam: 'Sony A7IV', yr: '2025', loc: 'الطائف' }
-      ];
-
+    function initGallery(activePhotos) {
       'use strict';
       const EYE_HEIGHT = 1.6;
-      const SHOW_DIST = 2.2;
-      
+      const SHOW_DIST = 2.5;
+
       const SLOTS = [
         { pos: [-4.6, EYE_HEIGHT, -10], rotY: Math.PI / 2 },
         { pos: [-4.6, EYE_HEIGHT, -5], rotY: Math.PI / 2 },
@@ -94,16 +105,20 @@ export default function Home() {
 
       const state = {
         yaw: 0, pitch: 0,
+        move: { forward: 0, backward: 0, left: 0, right: 0 },
         joy: { a: false, id: null, cx: 0, cy: 0, dx: 0, dy: 0 },
         look: { a: false, id: null, lx: 0, ly: 0 },
+        mouseLook: false,
+        lastMouseX: 0,
+        lastMouseY: 0,
         tap: {}
       };
 
       let scene, camera, renderer, hitGroups = [], fullscreenOpen = false, panelTarget = null;
-      
+
       const host = document.getElementById('canvasHost');
       if (!host) return;
-      host.innerHTML = ''; // تفريغ الكانفاس القديم إن وجد
+      host.innerHTML = '';
 
       scene = new window.THREE.Scene();
       scene.background = new window.THREE.Color(0x141210);
@@ -146,7 +161,7 @@ export default function Home() {
 
       const loader = new window.THREE.TextureLoader();
 
-      PHOTOS.forEach((ph, i) => {
+      activePhotos.forEach((ph, i) => {
         const slot = SLOTS[i];
         if (!slot) return;
         const g = new window.THREE.Group();
@@ -179,11 +194,61 @@ export default function Home() {
         loader.load(ph.url, (t) => {
           t.colorSpace = window.THREE.SRGBColorSpace;
           imgMesh.material = new window.THREE.MeshBasicMaterial({ map: t });
-        }, undefined, () => {
-          // صورة احتياطية في حال فشل التحميل
         });
       });
 
+      // --- تحكم لوحة المفاتيح (الكمبيوتر: WASD / الأسهم) ---
+      window.addEventListener('keydown', (e) => {
+        if (fullscreenOpen) return;
+        switch (e.code) {
+          case 'ArrowUp':
+          case 'KeyW': state.move.forward = 1; break;
+          case 'ArrowDown':
+          case 'KeyS': state.move.backward = 1; break;
+          case 'ArrowLeft':
+          case 'KeyA': state.move.left = 1; break;
+          case 'ArrowRight':
+          case 'KeyD': state.move.right = 1; break;
+        }
+      });
+
+      window.addEventListener('keyup', (e) => {
+        switch (e.code) {
+          case 'ArrowUp':
+          case 'KeyW': state.move.forward = 0; break;
+          case 'ArrowDown':
+          case 'KeyS': state.move.backward = 0; break;
+          case 'ArrowLeft':
+          case 'KeyA': state.move.left = 0; break;
+          case 'ArrowRight':
+          case 'KeyD': state.move.right = 0; break;
+        }
+      });
+
+      // --- تحكم الماوس للنظر والتجول والضغط على الصور ---
+      renderer.domElement.addEventListener('mousedown', (e) => {
+        if (fullscreenOpen) return;
+        state.mouseLook = true;
+        state.lastMouseX = e.clientX;
+        state.lastMouseY = e.clientY;
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!state.mouseLook || fullscreenOpen) return;
+        const dx = e.clientX - state.lastMouseX;
+        const dy = e.clientY - state.lastMouseY;
+        state.yaw -= dx * 0.003;
+        state.pitch -= dy * 0.003;
+        state.pitch = Math.max(-1, Math.min(1, state.pitch));
+        state.lastMouseX = e.clientX;
+        state.lastMouseY = e.clientY;
+      });
+
+      window.addEventListener('mouseup', () => {
+        state.mouseLook = false;
+      });
+
+      // --- تحكم اللمس (الجوالات) ---
       const joyZone = document.getElementById('joyZone');
       const joyKnob = document.getElementById('joyKnob');
 
@@ -251,6 +316,7 @@ export default function Home() {
         }
       });
 
+      // الضغط بالماوس لتكبير الصورة
       renderer.domElement.addEventListener('click', (e) => {
         triggerRaycast(e.clientX, e.clientY);
       });
@@ -295,12 +361,29 @@ export default function Home() {
         camera.rotation.x = state.pitch;
 
         if (!fullscreenOpen) {
+          // حركة الجوستستيك للجوال
           if (state.joy.a) {
             const dir = new window.THREE.Vector3(state.joy.dx, 0, state.joy.dy).applyQuaternion(camera.quaternion);
             dir.y = 0;
             if (dir.lengthSq() > 0) dir.normalize();
             camera.position.add(dir.multiplyScalar(0.08));
           }
+
+          // حركة لوحة المفاتيح للكمبيوتر (WASD / الأسهم)
+          const moveDir = new window.THREE.Vector3(
+            (state.move.right - state.move.left),
+            0,
+            (state.move.backward - state.move.forward)
+          );
+          if (moveDir.lengthSq() > 0) {
+            moveDir.applyAxisAngle(new window.THREE.Vector3(0, 1, 0), state.yaw);
+            moveDir.normalize();
+            camera.position.add(moveDir.multiplyScalar(0.09));
+          }
+
+          // حدود الحركة داخل الغرفة الافتراضية لمنع الخروج عن الجدران
+          camera.position.x = Math.max(-9, Math.min(9, camera.position.x));
+          camera.position.z = Math.max(-14, Math.min(14, camera.position.z));
 
           let near = null, minDist = Infinity;
           for (const g of hitGroups) {
@@ -406,7 +489,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* أداة التحكم (Joystick) */}
+      {/* أداة التحكم بالجوال (Joystick) */}
       <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, display: 'none' }}>
         <div id="joyZone" style={{ width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(255, 255, 255, .08)', border: '1px solid rgba(255, 255, 255, .18)', position: 'relative', touchAction: 'none' }}>
           <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .8)', position: 'absolute', top: '31px', left: '31px', pointerEvents: 'none' }}></div>
@@ -414,7 +497,7 @@ export default function Home() {
       </div>
 
       <div id="lookHintMobile" style={{ position: 'fixed', right: '20px', bottom: '26px', zIndex: 300, display: 'none', color: 'rgba(255, 255, 255, .7)', fontSize: '12px', background: 'rgba(0, 0, 0, .5)', padding: '8px 12px', borderRadius: '8px', pointerEvents: 'none' }}>
-        اسحب في أي مكان للتجول • انقر اللوحة لتكبيرها
+        استخدم WASD أو الأسهم للتجول • اسحب بالماوس أو اللمس للنظر • انقر اللوحة للتكبير
       </div>
     </>
   );
