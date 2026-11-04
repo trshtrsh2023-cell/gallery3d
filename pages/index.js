@@ -45,15 +45,23 @@ export default function Home() {
   useEffect(() => {
     if (typeof window === 'undefined' || photos.length === 0) return;
 
+    let disposed = false;
+    let cleanupFn = null;
+
     if (!window.THREE) {
       const script = document.createElement('script');
       script.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
       script.async = true;
-      script.onload = () => initGallery(photos);
+      script.onload = () => { if (!disposed) cleanupFn = initGallery(photos); };
       document.body.appendChild(script);
     } else {
-      initGallery(photos);
+      cleanupFn = initGallery(photos);
     }
+
+    return () => {
+      disposed = true;
+      if (cleanupFn) cleanupFn();
+    };
 
     function initGallery(activePhotos) {
       'use strict';
@@ -110,13 +118,14 @@ export default function Home() {
         mouseLook: false,
         lastMouseX: 0,
         lastMouseY: 0,
+        mouse: { downX: 0, downY: 0, moved: false, downTime: 0 },
         tap: {}
       };
 
-      let scene, camera, renderer, hitGroups = [], fullscreenOpen = false, panelTarget = null;
+      let scene, camera, renderer, hitGroups = [], fullscreenOpen = false, panelTarget = null, rafId = null;
 
       const host = document.getElementById('canvasHost');
-      if (!host) return;
+      if (!host) return () => {};
       host.innerHTML = '';
 
       scene = new window.THREE.Scene();
@@ -196,50 +205,66 @@ export default function Home() {
         });
       });
 
-      // --- استماع لأزرار لوحة المفاتيح (حركة بطيئة وثابتة) ---
-      window.addEventListener('keydown', (e) => {
+      // --- لوحة المفاتيح ---
+      function onKeyDown(e) {
         if (fullscreenOpen) return;
         if (e.code === 'KeyW' || e.code === 'ArrowUp') state.keys.w = true;
         if (e.code === 'KeyS' || e.code === 'ArrowDown') state.keys.s = true;
         if (e.code === 'KeyA' || e.code === 'ArrowLeft') state.keys.a = true;
         if (e.code === 'KeyD' || e.code === 'ArrowRight') state.keys.d = true;
-      });
-
-      window.addEventListener('keyup', (e) => {
+      }
+      function onKeyUp(e) {
         if (e.code === 'KeyW' || e.code === 'ArrowUp') state.keys.w = false;
         if (e.code === 'KeyS' || e.code === 'ArrowDown') state.keys.s = false;
         if (e.code === 'KeyA' || e.code === 'ArrowLeft') state.keys.a = false;
         if (e.code === 'KeyD' || e.code === 'ArrowRight') state.keys.d = false;
-      });
+      }
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('keyup', onKeyUp);
 
-      // --- تحكم الماوس للنظر والتجول ---
-      renderer.domElement.addEventListener('mousedown', (e) => {
+      // --- تحكم الماوس: سحب للنظر، ونقرة حقيقية (بدون سحب) لفتح الصورة ---
+      // الإصلاح الأساسي: كان حدث "click" العام يطلق عند كل تحرير زر الماوس
+      // حتى لو كانت حركة سحب للنظر حول الغرفة، فكان يفتح الصورة بشكل غير
+      // مقصود كل مرة يقترب فيها الزائر من لوحة وينظر حولها، فيتجمّد التحكم.
+      function onMouseDown(e) {
         if (fullscreenOpen) return;
         state.mouseLook = true;
         state.lastMouseX = e.clientX;
         state.lastMouseY = e.clientY;
-      });
-
-      window.addEventListener('mousemove', (e) => {
+        state.mouse.downX = e.clientX;
+        state.mouse.downY = e.clientY;
+        state.mouse.moved = false;
+        state.mouse.downTime = Date.now();
+      }
+      function onMouseMove(e) {
         if (!state.mouseLook || fullscreenOpen) return;
         const dx = e.clientX - state.lastMouseX;
         const dy = e.clientY - state.lastMouseY;
+        if (Math.hypot(e.clientX - state.mouse.downX, e.clientY - state.mouse.downY) > 6) {
+          state.mouse.moved = true;
+        }
         state.yaw -= dx * 0.003;
         state.pitch -= dy * 0.003;
         state.pitch = Math.max(-1, Math.min(1, state.pitch));
         state.lastMouseX = e.clientX;
         state.lastMouseY = e.clientY;
-      });
-
-      window.addEventListener('mouseup', () => {
+      }
+      function onMouseUp(e) {
+        const wasLooking = state.mouseLook;
         state.mouseLook = false;
-      });
+        if (wasLooking && !fullscreenOpen && !state.mouse.moved && (Date.now() - state.mouse.downTime) < 500) {
+          triggerRaycast(e.clientX, e.clientY);
+        }
+      }
+      renderer.domElement.addEventListener('mousedown', onMouseDown);
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
 
       // --- تحكم اللمس (الجوالات) ---
       const joyZone = document.getElementById('joyZone');
       const joyKnob = document.getElementById('joyKnob');
 
-      renderer.domElement.addEventListener('touchstart', (e) => {
+      function onTouchStart(e) {
         for (const t of e.changedTouches) {
           if (t.clientX < window.innerWidth * 0.45 && !state.joy.a) {
             state.joy.a = true;
@@ -257,9 +282,8 @@ export default function Home() {
           }
           state.tap[t.identifier] = { x: t.clientX, y: t.clientY, moved: false };
         }
-      }, { passive: true });
-
-      renderer.domElement.addEventListener('touchmove', (e) => {
+      }
+      function onTouchMove(e) {
         for (const t of e.changedTouches) {
           const tp = state.tap[t.identifier];
           if (tp && Math.hypot(t.clientX - tp.x, t.clientY - tp.y) > 8) tp.moved = true;
@@ -282,12 +306,11 @@ export default function Home() {
             state.look.ly = t.clientY;
           }
         }
-      }, { passive: true });
-
-      renderer.domElement.addEventListener('touchend', (e) => {
+      }
+      function onTouchEnd(e) {
         for (const t of e.changedTouches) {
           const tp = state.tap[t.identifier];
-          if (tp && !tp.moved) {
+          if (tp && !tp.moved && !fullscreenOpen) {
             triggerRaycast(t.clientX, t.clientY);
           }
           delete state.tap[t.identifier];
@@ -301,11 +324,10 @@ export default function Home() {
           }
           if (state.look.a && t.identifier === state.look.id) state.look.a = false;
         }
-      });
-
-      renderer.domElement.addEventListener('click', (e) => {
-        triggerRaycast(e.clientX, e.clientY);
-      });
+      }
+      renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: true });
+      renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: true });
+      renderer.domElement.addEventListener('touchend', onTouchEnd);
 
       function triggerRaycast(clientX, clientY) {
         const ray = new window.THREE.Raycaster();
@@ -333,15 +355,35 @@ export default function Home() {
         }
       }
 
-      window.addEventListener('resize', () => {
+      // الإصلاح الثاني: دالة الإغلاق يجب أن تعيش هنا داخل نفس النطاق
+      // (closure) الذي يملك متغير fullscreenOpen، لأن زر "رجوع" في React
+      // كان يغيّر فقط شكل العنصر (class) دون الوصول لهذا المتغير، فيبقى
+      // fullscreenOpen = true للأبد وتتعطل الحركة ولوحة المعلومات نهائياً.
+      function closeFS() {
+        fullscreenOpen = false;
+        const fsOverlay = document.getElementById('fsOverlay');
+        if (fsOverlay) fsOverlay.classList.remove('open');
+      }
+
+      const fsBackBtn = document.getElementById('fsBackBtn');
+      const fsOverlayEl = document.getElementById('fsOverlay');
+      function onFsBackClick(e) { e.stopPropagation(); closeFS(); }
+      function onFsOverlayClick(e) { if (e.target === fsOverlayEl) closeFS(); }
+      function onKeyDownEsc(e) { if (e.key === 'Escape' && fullscreenOpen) closeFS(); }
+      if (fsBackBtn) fsBackBtn.addEventListener('click', onFsBackClick);
+      if (fsOverlayEl) fsOverlayEl.addEventListener('click', onFsOverlayClick);
+      window.addEventListener('keydown', onKeyDownEsc);
+
+      function onResize() {
         if (!camera || !renderer) return;
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
-      });
+      }
+      window.addEventListener('resize', onResize);
 
       function animate() {
-        requestAnimationFrame(animate);
+        rafId = requestAnimationFrame(animate);
         if (!camera) return;
         camera.rotation.y = state.yaw;
         camera.rotation.x = state.pitch;
@@ -349,27 +391,17 @@ export default function Home() {
         if (!fullscreenOpen) {
           // سرعة حركة بطيئة وواقعية
           const speed = 0.04;
-          const moveVector = new window.THREE.Vector3(0, 0, 0);
 
-          if (state.keys.w) moveVector.z -= 1;
-          if (state.keys.s) moveVector.z += 1;
-          if (state.keys.a) moveVector.x -= 1;
-          if (state.keys.d) moveVector.x += 1;
+          const camDir = new window.THREE.Vector3(Math.sin(state.yaw), 0, Math.cos(state.yaw));
+          const sideDir = new window.THREE.Vector3(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
 
-          if (moveVector.lengthSq() > 0) {
-            moveVector.normalize();
-            // تطبيق الاتجاه بناءً على زاوية الرؤية الأفقية (yaw) فقط لضمان حركة أفقية دقيقة ومستقرة
-            const camDir = new window.THREE.Vector3(Math.sin(state.yaw), 0, Math.cos(state.yaw));
-            const sideDir = new window.THREE.Vector3(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
-            
-            let displacement = new window.THREE.Vector3(0, 0, 0);
-            if (state.keys.w) displacement.addScaledVector(camDir, speed);
-            if (state.keys.s) displacement.addScaledVector(camDir, -speed);
-            if (state.keys.a) displacement.addScaledVector(sideDir, speed);
-            if (state.keys.d) displacement.addScaledVector(sideDir, -speed);
-
-            camera.position.add(displacement);
-          }
+          let displacement = new window.THREE.Vector3(0, 0, 0);
+          let hasKeyMove = false;
+          if (state.keys.w) { displacement.addScaledVector(camDir, speed); hasKeyMove = true; }
+          if (state.keys.s) { displacement.addScaledVector(camDir, -speed); hasKeyMove = true; }
+          if (state.keys.a) { displacement.addScaledVector(sideDir, speed); hasKeyMove = true; }
+          if (state.keys.d) { displacement.addScaledVector(sideDir, -speed); hasKeyMove = true; }
+          if (hasKeyMove) camera.position.add(displacement);
 
           // حركة الجوستستيك للجوال
           if (state.joy.a) {
@@ -414,6 +446,26 @@ export default function Home() {
         renderer.render(scene, camera);
       }
       animate();
+
+      return function cleanup() {
+        if (rafId) cancelAnimationFrame(rafId);
+        window.removeEventListener('keydown', onKeyDown);
+        window.removeEventListener('keyup', onKeyUp);
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('resize', onResize);
+        window.removeEventListener('keydown', onKeyDownEsc);
+        if (renderer) {
+          renderer.domElement.removeEventListener('mousedown', onMouseDown);
+          renderer.domElement.removeEventListener('touchstart', onTouchStart);
+          renderer.domElement.removeEventListener('touchmove', onTouchMove);
+          renderer.domElement.removeEventListener('touchend', onTouchEnd);
+          renderer.dispose();
+        }
+        if (fsBackBtn) fsBackBtn.removeEventListener('click', onFsBackClick);
+        if (fsOverlayEl) fsOverlayEl.removeEventListener('click', onFsOverlayClick);
+        if (host) host.innerHTML = '';
+      };
     }
   }, [photos]);
 
@@ -424,11 +476,6 @@ export default function Home() {
     if (entry) entry.style.display = 'none';
     if (joyWrap) joyWrap.style.display = 'block';
     if (lookHint) lookHint.style.display = 'block';
-  };
-
-  const handleCloseFS = () => {
-    const fsOverlay = document.getElementById('fsOverlay');
-    if (fsOverlay) fsOverlay.classList.remove('open');
   };
 
   const handleToggleGlass = (e) => {
@@ -442,10 +489,35 @@ export default function Home() {
       <Head>
         <title>معرض الفوتوغرافيا الافتراضي — Modern Hall</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
       </Head>
 
+      {/*
+        الإصلاح الجوهري: هذا الـ <style> كان مفقوداً بالكامل من نسخة
+        Next.js، لذلك كانت فئات visible / expanded / open لا تُحدث أي
+        تغيير مرئي مهما بدّلها الكود — فلا تظهر لوحة المعلومات الزجاجية،
+        ولا يظهر زر الرجوع من وضع ملء الشاشة (فيبقى المستخدم عالقاً).
+      */}
+      <style>{`
+        html, body { user-select: none; -webkit-user-select: none; }
+        #infoGlass.visible { opacity: 0.85 !important; pointer-events: auto !important; }
+        #infoGlass.expanded { opacity: 1 !important; background: rgba(15,12,10,0.95) !important; border: 1px solid rgba(201,163,91,.5); }
+        #infoGlass.expanded .info-hint { display: none !important; }
+        #infoGlass:not(.expanded) .info-body { display: none !important; }
+        #infoGlass.expanded .info-body { display: block !important; }
+        #infoGlass .info-dot { animation: pulseDot 1.8s infinite; }
+        @keyframes pulseDot {
+          0% { box-shadow: 0 0 0 0 rgba(201,163,91,.6); }
+          70% { box-shadow: 0 0 0 8px rgba(201,163,91,0); }
+          100% { box-shadow: 0 0 0 0 rgba(201,163,91,0); }
+        }
+        #fsOverlay.open { display: flex !important; }
+        #fsBackBtn:active { filter: brightness(1.15); }
+      `}</style>
+
       <div id="canvasHost" style={{ position: 'fixed', inset: 0, touchAction: 'none' }}></div>
-      
+
       {/* واجهة الدخول */}
       <div id="entryOverlay" style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'radial-gradient(circle at 50% 30%, #201b17 0%, #080706 70%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#eee' }}>
         <div style={{ textAlign: 'center', padding: '40px 36px', width: 'min(90vw, 420px)' }}>
@@ -461,9 +533,9 @@ export default function Home() {
       </div>
 
       {/* لوحة معلومات الصورة على اليمين */}
-      <div className="info-glass" id="infoGlass" onClick={handleToggleGlass} style={{ position: 'fixed', top: '50%', right: '20px', transform: 'translateY(-50%)', width: '270px', borderRadius: '16px', background: 'rgba(255, 255, 255, 0.08)', backdropFilter: 'blur(16px)', padding: '16px', zIndex: 250, color: '#f3efe8', opacity: 0, pointerEvents: 'none', transition: 'opacity .4s ease' }}>
+      <div className="info-glass" id="infoGlass" onClick={handleToggleGlass} style={{ position: 'fixed', top: '50%', right: '20px', transform: 'translateY(-50%)', width: '270px', maxWidth: '65vw', borderRadius: '16px', background: 'rgba(255, 255, 255, 0.08)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', padding: '16px', zIndex: 250, color: '#f3efe8', opacity: 0, pointerEvents: 'none', transition: 'opacity .4s ease, background .3s ease' }}>
         <div className="info-hint" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
-          <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#c9a35b' }}></span>
+          <span className="info-dot" style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#c9a35b', flexShrink: 0 }}></span>
           <span>اضغط لتفاصيل الصورة</span>
         </div>
         <div className="info-body" style={{ display: 'none', cursor: 'pointer' }}>
@@ -476,8 +548,8 @@ export default function Home() {
       </div>
 
       {/* شاشة العرض الكامل للصورة */}
-      <div className="fs-overlay" id="fsOverlay" onClick={(e) => e.target.id === 'fsOverlay' && handleCloseFS()} style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0, 0, 0, .94)', display: 'none', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: '20px' }}>
-        <button onClick={handleCloseFS} style={{ position: 'fixed', top: '20px', right: '20px', zIndex: 2100, background: 'rgba(201, 163, 91, .25)', color: '#f3efe8', border: '1px solid rgba(201, 163, 91, .5)', padding: '10px 20px', borderRadius: '30px', cursor: 'pointer' }}>
+      <div className="fs-overlay" id="fsOverlay" style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0, 0, 0, .94)', display: 'none', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: '20px' }}>
+        <button id="fsBackBtn" style={{ position: 'fixed', top: '20px', right: '20px', zIndex: 2100, background: 'rgba(201, 163, 91, .25)', color: '#f3efe8', border: '1px solid rgba(201, 163, 91, .5)', padding: '10px 20px', borderRadius: '30px', cursor: 'pointer' }}>
           ↩ رجوع للمعرض
         </button>
         <img id="fsImg" src="" alt="" style={{ maxWidth: '90vw', maxHeight: '75vh', objectFit: 'contain', borderRadius: '4px' }} />
