@@ -1,421 +1,1024 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Head from 'next/head';
 
-export default function Home() {
-  const [photos, setPhotos] = useState([]);
+const SLOTS = [
+  { id:0,  pos:[-10.85,2.5, -9.5], rotY:  Math.PI/2 },
+  { id:1,  pos:[-10.85,2.5, -3.0], rotY:  Math.PI/2 },
+  { id:2,  pos:[-10.85,2.5,  3.5], rotY:  Math.PI/2 },
+  { id:3,  pos:[-10.85,2.5,  9.5], rotY:  Math.PI/2 },
+  { id:4,  pos:[ 10.85,2.5, -9.5], rotY: -Math.PI/2 },
+  { id:5,  pos:[ 10.85,2.5, -3.0], rotY: -Math.PI/2 },
+  { id:6,  pos:[ 10.85,2.5,  3.5], rotY: -Math.PI/2 },
+  { id:7,  pos:[ 10.85,2.5,  9.5], rotY: -Math.PI/2 },
+  { id:8,  pos:[  -6.0,2.5,-16.85],rotY:  0 },
+  { id:9,  pos:[   0.0,2.5,-16.85],rotY:  0 },
+  { id:10, pos:[   6.0,2.5,-16.85],rotY:  0 },
+  { id:11, pos:[ -5.35,2.5, -9.5], rotY:  Math.PI/2 },
+  { id:12, pos:[ -5.35,2.5,  3.0], rotY:  Math.PI/2 },
+  { id:13, pos:[  5.35,2.5, -9.5], rotY: -Math.PI/2 },
+  { id:14, pos:[  5.35,2.5,  3.0], rotY: -Math.PI/2 },
+];
 
-  // جلب الصور الحقيقية من قاعدة بيانات المشروع عند تحميل الصفحة
-  useEffect(() => {
-    fetch('/api/photos')
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          // تحويل البيانات لتوافق هيكل المعرض الافتراضي
-          const formattedPhotos = data.map((p) => ({
-            title: p.title || 'لوحة فنية',
-            url: p.image_url || p.url,
-            ph: p.photographer || 'مصور المعرض',
-            cam: p.camera || 'Canon EOS R5',
-            yr: p.year || '2025',
-            loc: p.location || 'الطائف'
-          }));
-          setPhotos(formattedPhotos);
-        }
-      })
-      .catch((err) => console.log('خطأ في جلب الصور:', err));
-  }, []);
+// Realistic wood tones for frames
+const FRAME_STYLES = [
+  { color:0x8B6914, dark:0x5C4309, name:'walnut' },
+  { color:0xC4934A, dark:0x8B6218, name:'oak' },
+  { color:0x2C1810, dark:0x180C08, name:'ebony' },
+  { color:0xA0522D, dark:0x6B3418, name:'mahogany' },
+  { color:0xD4A853, dark:0x9B7A32, name:'maple' },
+  { color:0x4A3728, dark:0x2C2018, name:'dark-walnut' },
+  { color:0xC49A6C, dark:0x8B6A44, name:'light-oak' },
+  { color:0x1C1C1C, dark:0x101010, name:'matte-black' },
+  { color:0xD4AF37, dark:0x9B8020, name:'gold' },
+  { color:0xC0C0C0, dark:0x888888, name:'silver' },
+  { color:0x8B6914, dark:0x5C4309, name:'walnut' },
+  { color:0xC4934A, dark:0x8B6218, name:'oak' },
+  { color:0x2C1810, dark:0x180C08, name:'ebony' },
+  { color:0xD4A853, dark:0x9B7A32, name:'maple' },
+  { color:0xA0522D, dark:0x6B3418, name:'mahogany' },
+];
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
+// ── Procedural texture generators ──────────────────────────────
+function makeWallTexture(w=512, h=512) {
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d');
 
-    // تحميل مكتبة Three.js إذا لم تكن محملة
-    if (!window.THREE) {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
-      script.async = true;
-      script.onload = () => initGallery(photos);
-      document.body.appendChild(script);
-    } else {
-      initGallery(photos);
+  // Base warm white
+  ctx.fillStyle = '#e8e2da';
+  ctx.fillRect(0, 0, w, h);
+
+  // Subtle plaster noise — multiple passes
+  for (let i = 0; i < 6000; i++) {
+    const x = Math.random()*w, y = Math.random()*h;
+    const r = Math.random()*2.5 + 0.3;
+    const alpha = Math.random()*0.028 + 0.005;
+    const light = Math.random() > 0.5;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI*2);
+    ctx.fillStyle = light ? `rgba(255,252,248,${alpha})` : `rgba(160,148,132,${alpha})`;
+    ctx.fill();
+  }
+
+  // Subtle horizontal brush strokes
+  for (let i = 0; i < 80; i++) {
+    const y = Math.random()*h;
+    const alpha = Math.random()*0.012;
+    ctx.fillStyle = `rgba(180,168,152,${alpha})`;
+    ctx.fillRect(0, y, w, Math.random()*1.5 + 0.3);
+  }
+
+  // Vignette edges slightly darker
+  const vig = ctx.createRadialGradient(w/2,h/2,h*0.2, w/2,h/2,h*0.85);
+  vig.addColorStop(0,'rgba(0,0,0,0)');
+  vig.addColorStop(1,'rgba(40,30,20,0.06)');
+  ctx.fillStyle = vig; ctx.fillRect(0,0,w,h);
+
+  return cv;
+}
+
+function makeFloorTexture(w=1024, h=1024) {
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d');
+
+  // Base stone
+  ctx.fillStyle = '#a89880';
+  ctx.fillRect(0, 0, w, h);
+
+  // Stone grain
+  for (let i = 0; i < 8000; i++) {
+    const x = Math.random()*w, y = Math.random()*h;
+    const r = Math.random()*3 + 0.5;
+    const alpha = Math.random()*0.04;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI*2);
+    ctx.fillStyle = Math.random()>0.5 ? `rgba(200,185,160,${alpha})` : `rgba(80,65,50,${alpha})`;
+    ctx.fill();
+  }
+
+  // Tile grid lines — large format stone tiles
+  const tileW = w/4, tileH = h/4;
+  ctx.strokeStyle = 'rgba(80,65,50,0.22)';
+  ctx.lineWidth = 3;
+  for (let x = 0; x <= w; x += tileW) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+  for (let y = 0; y <= h; y += tileH) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+
+  // Grout fill
+  ctx.strokeStyle = 'rgba(90,75,58,0.15)';
+  ctx.lineWidth = 1.5;
+  for (let x = 0; x <= w; x += tileW) { ctx.beginPath(); ctx.moveTo(x-1,0); ctx.lineTo(x-1,h); ctx.stroke(); }
+  for (let y = 0; y <= h; y += tileH) { ctx.beginPath(); ctx.moveTo(0,y-1); ctx.lineTo(w,y-1); ctx.stroke(); }
+
+  // Subtle sheen per tile
+  for (let tx = 0; tx < 4; tx++) for (let ty = 0; ty < 4; ty++) {
+    const x0=tx*tileW, y0=ty*tileH;
+    const g = ctx.createLinearGradient(x0,y0,x0+tileW,y0+tileH);
+    g.addColorStop(0,'rgba(255,248,240,0.06)');
+    g.addColorStop(0.5,'rgba(255,248,240,0.02)');
+    g.addColorStop(1,'rgba(80,60,40,0.04)');
+    ctx.fillStyle=g; ctx.fillRect(x0+2,y0+2,tileW-4,tileH-4);
+  }
+
+  return cv;
+}
+
+function makeWoodFrameTexture(w=256, h=64, style) {
+  const cv = document.createElement('canvas');
+  cv.width=w; cv.height=h;
+  const ctx = cv.getContext('2d');
+
+  const c1 = '#'+style.color.toString(16).padStart(6,'0');
+  const c2 = '#'+style.dark.toString(16).padStart(6,'0');
+
+  if (style.name === 'gold' || style.name === 'silver') {
+    // Metallic gradient
+    const g = ctx.createLinearGradient(0,0,w,h);
+    g.addColorStop(0, style.name==='gold' ? '#e8c84a':'#d8d8d8');
+    g.addColorStop(0.3, c1);
+    g.addColorStop(0.5, style.name==='gold' ? '#f8e070':'#f0f0f0');
+    g.addColorStop(0.7, c1);
+    g.addColorStop(1, c2);
+    ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+    // Metallic sheen lines
+    for(let i=0;i<20;i++){
+      ctx.strokeStyle=`rgba(255,245,200,${Math.random()*0.15})`;
+      ctx.lineWidth=Math.random()*1.5;
+      ctx.beginPath();ctx.moveTo(Math.random()*w,0);ctx.lineTo(Math.random()*w,h);ctx.stroke();
     }
+    return cv;
+  }
 
-    function initGallery(dynamicPhotos) {
-      // استخدام الصور القادمة من قاعدة البيانات أو الصور الافتراضية في حال عدم وجود صور
-      const PHOTOS = dynamicPhotos.length > 0 ? dynamicPhotos : [
-        { title: 'غروب الطائف', url: 'https://picsum.photos/seed/taif1/900/600', ph: 'أنور محمد', cam: 'Canon EOS R5', yr: '2025', loc: 'الشفا' },
-        { title: 'شفا الطائف', url: 'https://picsum.photos/seed/taif2/900/600', ph: 'عدنان الخمري', cam: 'Sony A7IV', yr: '2025', loc: 'الطائف' }
-      ];
+  if (style.name === 'matte-black') {
+    ctx.fillStyle='#1a1a1a'; ctx.fillRect(0,0,w,h);
+    for(let i=0;i<500;i++){
+      ctx.fillStyle=`rgba(80,80,80,${Math.random()*0.04})`;
+      ctx.fillRect(Math.random()*w,Math.random()*h,Math.random()*3,Math.random()*3);
+    }
+    return cv;
+  }
 
-      'use strict';
-      const EYE_HEIGHT = 1.6;
-      const SHOW_DIST = 2.2;
-      
-      const SLOTS = [
-        { pos: [-4.6, EYE_HEIGHT, -10], rotY: Math.PI / 2 },
-        { pos: [-4.6, EYE_HEIGHT, -5], rotY: Math.PI / 2 },
-        { pos: [-4.6, EYE_HEIGHT, 0], rotY: Math.PI / 2 },
-        { pos: [-4.6, EYE_HEIGHT, 5], rotY: Math.PI / 2 },
-        { pos: [4.6, EYE_HEIGHT, -10], rotY: -Math.PI / 2 },
-        { pos: [4.6, EYE_HEIGHT, -5], rotY: -Math.PI / 2 },
-        { pos: [4.6, EYE_HEIGHT, 0], rotY: -Math.PI / 2 },
-        { pos: [4.6, EYE_HEIGHT, 5], rotY: -Math.PI / 2 },
-        { pos: [-6, EYE_HEIGHT, -14.4], rotY: 0 },
-        { pos: [0, EYE_HEIGHT, -14.4], rotY: 0 },
-        { pos: [6, EYE_HEIGHT, -14.4], rotY: 0 }
-      ];
+  // Wood grain
+  const baseG = ctx.createLinearGradient(0,0,0,h);
+  baseG.addColorStop(0,c1); baseG.addColorStop(0.4,c2); baseG.addColorStop(0.7,c1); baseG.addColorStop(1,c2);
+  ctx.fillStyle=baseG; ctx.fillRect(0,0,w,h);
 
-      function createWoodTexture() {
-        const canvas = document.createElement('canvas');
-        canvas.width = 512; canvas.height = 512;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#3a2517';
-        ctx.fillRect(0, 0, 512, 512);
-        for (let i = 0; i < 512; i += 32) {
-          ctx.fillStyle = (i % 64 === 0) ? '#2d1c11' : '#452d1d';
-          ctx.fillRect(0, i, 512, 30);
-          ctx.fillStyle = 'rgba(0,0,0,0.15)';
-          ctx.fillRect(0, i + 30, 512, 2);
-        }
-        return new window.THREE.CanvasTexture(canvas);
-      }
+  // Wood grain lines
+  for (let i=0; i<60; i++){
+    const y = Math.random()*h*2 - h*0.5;
+    const amp = Math.random()*4+1;
+    const freq = Math.random()*0.04+0.01;
+    ctx.strokeStyle = Math.random()>0.5
+      ? `rgba(255,220,160,${Math.random()*0.08+0.02})`
+      : `rgba(40,20,5,${Math.random()*0.1+0.03})`;
+    ctx.lineWidth = Math.random()*1.2+0.3;
+    ctx.beginPath();
+    for(let x=0;x<w;x+=2){
+      const wy=y+Math.sin(x*freq)*amp+Math.sin(x*freq*2.3)*amp*0.4;
+      x===0?ctx.moveTo(x,wy):ctx.lineTo(x,wy);
+    }
+    ctx.stroke();
+  }
 
-      function createWallTexture() {
-        const canvas = document.createElement('canvas');
-        canvas.width = 256; canvas.height = 256;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#e8e3dc';
-        ctx.fillRect(0, 0, 256, 256);
-        for (let i = 0; i < 500; i++) {
-          ctx.fillStyle = 'rgba(0,0,0,0.015)';
-          ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
-        }
-        return new window.THREE.CanvasTexture(canvas);
-      }
+  // Edge highlight
+  const hG=ctx.createLinearGradient(0,0,0,h);
+  hG.addColorStop(0,'rgba(255,235,190,0.18)');
+  hG.addColorStop(0.15,'rgba(255,235,190,0.06)');
+  hG.addColorStop(1,'rgba(0,0,0,0.12)');
+  ctx.fillStyle=hG; ctx.fillRect(0,0,w,h);
 
-      const state = {
-        yaw: 0, pitch: 0,
-        joy: { a: false, id: null, cx: 0, cy: 0, dx: 0, dy: 0 },
-        look: { a: false, id: null, lx: 0, ly: 0 },
-        tap: {}
+  return cv;
+}
+
+function makeCeilingTexture(w=512,h=512){
+  const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle='#f5f2ee'; ctx.fillRect(0,0,w,h);
+  for(let i=0;i<3000;i++){
+    ctx.fillStyle=`rgba(${Math.random()>0.5?'220,215,208':'160,150,140'},${Math.random()*0.015})`;
+    const r=Math.random()*2;
+    ctx.beginPath();ctx.arc(Math.random()*w,Math.random()*h,r,0,Math.PI*2);ctx.fill();
+  }
+  return cv;
+}
+
+// ── Main Component ──────────────────────────────────────────────
+export default function Gallery() {
+  const mountRef    = useRef(null);
+  const stateRef    = useRef({
+    yaw:0, pitch:0, keys:{}, isLocked:false,
+    joystick:{ active:false, dx:0, dy:0 },
+    lookTouch:{ active:false, id:null, lastX:0, lastY:0 },
+  });
+
+  const [photos,setPhotos]         = useState([]);
+  const [entered,setEntered]       = useState(false);
+  const [photoInfo,setPhotoInfo]   = useState(null);
+  const [locked,setLocked]         = useState(false);
+  const [isMobile,setIsMobile]     = useState(false);
+  const [loading,setLoading]       = useState(false);
+
+  const joystickZoneRef = useRef(null);
+  const joystickKnobRef = useRef(null);
+
+  useEffect(()=>{
+    setIsMobile('ontouchstart' in window||navigator.maxTouchPoints>0);
+    fetch('/api/photos').then(r=>r.json()).then(d=>setPhotos(Array.isArray(d)?d:[]));
+  },[]);
+
+  useEffect(()=>{
+    if(!entered) return;
+    setLoading(true);
+    const s=stateRef.current;
+    let THREE, renderer, scene, camera, animId;
+    const hitMeshes=[];
+
+    const init=async()=>{
+      THREE=await import('three');
+
+      // ── Scene ────────────────────────────────────────
+      scene=new THREE.Scene();
+      scene.background=new THREE.Color(0xd8d0c6);
+      scene.fog=new THREE.Fog(0xd8d0c6, 18, 42);
+
+      camera=new THREE.PerspectiveCamera(68, innerWidth/innerHeight, 0.05, 60);
+      camera.position.set(0,1.72,13);
+
+      renderer=new THREE.WebGLRenderer({ antialias:true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+      renderer.setSize(innerWidth,innerHeight);
+      renderer.shadowMap.enabled=true;
+      renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+      renderer.toneMapping=THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure=0.95;
+      renderer.outputColorSpace=THREE.SRGBColorSpace||'srgb';
+      mountRef.current?.appendChild(renderer.domElement);
+
+      await buildRoom(THREE);
+      await buildArtworks(THREE, hitMeshes);
+      setupControls(renderer);
+      animate(THREE, hitMeshes);
+      setLoading(false);
+    };
+
+    // ══════════════════════════════════════════════════
+    //  ROOM — realistic textures
+    // ══════════════════════════════════════════════════
+    const buildRoom=async(T)=>{
+      const RW=22, RL=34, RH=5.6;
+
+      // Pre-generate textures
+      const wallTex   = new T.CanvasTexture(makeWallTexture(512,512));
+      wallTex.wrapS   = wallTex.wrapT = T.RepeatWrapping;
+      wallTex.repeat.set(4,2);
+
+      const floorTex  = new T.CanvasTexture(makeFloorTexture(1024,1024));
+      floorTex.wrapS  = floorTex.wrapT = T.RepeatWrapping;
+      floorTex.repeat.set(8,11);
+
+      const ceilTex   = new T.CanvasTexture(makeCeilingTexture(512,512));
+      ceilTex.wrapS   = ceilTex.wrapT = T.RepeatWrapping;
+      ceilTex.repeat.set(5,8);
+
+      // Materials
+      const wallM  = new T.MeshStandardMaterial({ map:wallTex, roughness:0.92, metalness:0 });
+      const floorM = new T.MeshStandardMaterial({ map:floorTex, roughness:0.45, metalness:0.08 });
+      const ceilM  = new T.MeshStandardMaterial({ map:ceilTex, roughness:0.97, metalness:0 });
+      const moldM  = new T.MeshStandardMaterial({ color:0xddd5c5, roughness:0.6, metalness:0.04 });
+      const baseM  = new T.MeshStandardMaterial({ color:0xcfc7b7, roughness:0.65, metalness:0.02 });
+
+      const box=(w,h,d,mat,px,py,pz,ry=0)=>{
+        const mesh=new T.Mesh(new T.BoxGeometry(w,h,d),mat);
+        mesh.position.set(px,py,pz); mesh.rotation.y=ry;
+        mesh.receiveShadow=mesh.castShadow=true;
+        scene.add(mesh); return mesh;
       };
 
-      let scene, camera, renderer, hitGroups = [], fullscreenOpen = false, panelTarget = null;
-      
-      const host = document.getElementById('canvasHost');
-      if (!host) return;
-      host.innerHTML = ''; // تفريغ الكانفاس القديم إن وجد
+      // Shell
+      box(RW, 0.28, RL, floorM, 0,-0.14,0);
+      box(RW, 0.16, RL, ceilM,  0, RH,  0);
+      box(0.28, RH, RL, wallM, -RW/2, RH/2, 0);
+      box(0.28, RH, RL, wallM,  RW/2, RH/2, 0);
+      box(RW, RH, 0.28, wallM,  0, RH/2,-RL/2);
+      box(RW, RH, 0.28, wallM,  0, RH/2, RL/2);
+      // Dividers
+      box(0.22,RH,7, wallM,-5.5,RH/2,-7);
+      box(0.22,RH,7, wallM, 5.5,RH/2,-7);
+      box(0.22,RH,7, wallM,-5.5,RH/2, 6);
+      box(0.22,RH,7, wallM, 5.5,RH/2, 6);
 
-      scene = new window.THREE.Scene();
-      scene.background = new window.THREE.Color(0x141210);
-      camera = new window.THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-      camera.position.set(0, EYE_HEIGHT, 14);
-      camera.rotation.order = 'YXZ';
+      // ── Baseboard (detailed profile) ────────────────
+      const mkBase=(w,d,px,py,pz,ry=0)=>{
+        // Main panel
+        box(w, 0.28, d, baseM, px,0.14,pz,ry);
+        // Cap rail
+        box(w, 0.06, d+0.02, moldM, px,0.29,pz,ry);
+        // Shoe
+        box(w, 0.04, d+0.01, baseM, px,0.02,pz,ry);
+      };
+      mkBase(RW, 0.1, 0, 0, -RL/2+0.14);
+      mkBase(RW, 0.1, 0, 0,  RL/2-0.14);
+      mkBase(0.1, RL, -RW/2+0.14, 0, 0, Math.PI/2);
+      mkBase(0.1, RL,  RW/2-0.14, 0, 0, Math.PI/2);
 
-      renderer = new window.THREE.WebGLRenderer({ antialias: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.outputColorSpace = window.THREE.SRGBColorSpace;
-      host.appendChild(renderer.domElement);
+      // ── Crown molding ────────────────────────────────
+      const mkCrown=(w,d,px,pz,ry=0)=>{
+        box(w, 0.1, d, moldM, px,RH-0.05,pz,ry);
+        box(w, 0.18, d+0.01, moldM, px,RH-0.16,pz,ry);
+      };
+      mkCrown(RW, 0.08, 0,-RL/2+0.14);
+      mkCrown(RW, 0.08, 0, RL/2-0.14);
+      mkCrown(0.08, RL,-RW/2+0.14,0, Math.PI/2);
+      mkCrown(0.08, RL, RW/2-0.14,0, Math.PI/2);
 
-      scene.add(new window.THREE.AmbientLight(0xfff5ea, 0.7));
+      // ── Chair rail (dado rail) ───────────────────────
+      const chairH=1.1;
+      const cRailM=new T.MeshStandardMaterial({color:0xdad2c2,roughness:0.55,metalness:0.03});
+      box(RW,0.055,0.07,cRailM, 0,chairH,-RL/2+0.14);
+      box(RW,0.055,0.07,cRailM, 0,chairH, RL/2-0.14);
+      box(0.07,0.055,RL,cRailM,-RW/2+0.14,chairH,0);
+      box(0.07,0.055,RL,cRailM, RW/2-0.14,chairH,0);
 
-      const woodTex = createWoodTexture();
-      woodTex.wrapS = woodTex.wrapT = window.THREE.RepeatWrapping;
-      woodTex.repeat.set(8, 8);
-      const floorMat = new window.THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.3, metalness: 0.1 });
-      const floor = new window.THREE.Mesh(new window.THREE.PlaneGeometry(50, 50), floorMat);
-      floor.rotation.x = -Math.PI / 2;
-      scene.add(floor);
+      // ── Floor border inlay ───────────────────────────
+      const inlayM=new T.MeshStandardMaterial({color:0x8a7660,roughness:0.4,metalness:0.1});
+      box(RW-0.4,0.015,0.12,inlayM, 0,0.01,-RL/2+1);
+      box(RW-0.4,0.015,0.12,inlayM, 0,0.01, RL/2-1);
+      box(0.12,0.015,RL-2,inlayM,-RW/2+1,0.01,0);
+      box(0.12,0.015,RL-2,inlayM, RW/2-1,0.01,0);
 
-      const wallTex = createWallTexture();
-      wallTex.wrapS = wallTex.wrapT = window.THREE.RepeatWrapping;
-      wallTex.repeat.set(4, 2);
-      const wallMat = new window.THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.8 });
+      // ── CEILING TRACK SYSTEM ─────────────────────────
+      const trackM =new T.MeshStandardMaterial({color:0x1a1a22,roughness:0.12,metalness:0.96});
+      const coneM  =new T.MeshStandardMaterial({color:0x0e0e16,roughness:0.08,metalness:0.98});
+      const lensM  =new T.MeshStandardMaterial({color:0xfff8e0,emissive:0xfff8e0,emissiveIntensity:2.0,roughness:0,metalness:0,transparent:true,opacity:0.95});
 
-      function addWall(w, h, d, x, y, z) {
-        const m = new window.THREE.Mesh(new window.THREE.BoxGeometry(w, h, d), wallMat);
-        m.position.set(x, y, z);
-        scene.add(m);
-      }
+      [-7,0,7].forEach(rx=>{
+        // Rail
+        const rail=new T.Mesh(new T.BoxGeometry(0.044,0.032,RL-1),trackM);
+        rail.position.set(rx,RH-0.03,0); scene.add(rail);
 
-      addWall(30, 6, 0.6, 0, 3, -15);
-      addWall(0.6, 6, 30, -10, 3, 0);
-      addWall(0.6, 6, 30, 10, 3, 0);
-      addWall(0.5, 6, 20, -5, 3, 0);
-      addWall(0.5, 6, 20, 5, 3, 0);
+        // Track end caps
+        [-1,1].forEach(side=>{
+          const cap=new T.Mesh(new T.BoxGeometry(0.06,0.04,0.06),trackM);
+          cap.position.set(rx,RH-0.03,side*(RL/2-0.7)); scene.add(cap);
+        });
 
-      const loader = new window.THREE.TextureLoader();
+        [-9.5,-3.5,3.5,9.5].forEach(rz=>{
+          const g=new T.Group(); g.position.set(rx,RH-0.032,rz);
 
-      PHOTOS.forEach((ph, i) => {
-        const slot = SLOTS[i];
-        if (!slot) return;
-        const g = new window.THREE.Group();
-        g.position.set(slot.pos[0], EYE_HEIGHT, slot.pos[2]);
-        g.rotation.y = slot.rotY;
-        g.userData = ph;
+          // Adapter on rail
+          const adapt=new T.Mesh(new T.BoxGeometry(0.07,0.05,0.07),trackM);
+          adapt.position.y=-0.025; g.add(adapt);
 
-        const imgMesh = new window.THREE.Mesh(
-          new window.THREE.PlaneGeometry(2.4, 1.6),
-          new window.THREE.MeshBasicMaterial({ color: 0x222222 })
-        );
-        imgMesh.position.z = 0.15;
-        g.add(imgMesh);
+          // Stem
+          const stem=new T.Mesh(new T.CylinderGeometry(0.012,0.012,0.28,8),trackM);
+          stem.position.y=-0.165; g.add(stem);
 
-        const frame = new window.THREE.Mesh(
-          new window.THREE.BoxGeometry(2.55, 1.75, 0.08),
-          new window.THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 })
-        );
-        frame.position.z = 0.1;
-        g.add(frame);
+          // Knuckle joint
+          const knuck=new T.Mesh(new T.SphereGeometry(0.022,10,10),trackM);
+          knuck.position.y=-0.305; g.add(knuck);
 
-        const spot = new window.THREE.SpotLight(0xffeedd, 1.4, 6, Math.PI / 6, 0.5);
-        spot.position.set(slot.pos[0], EYE_HEIGHT + 1.5, slot.pos[2] + (slot.rotY === 0 ? 1 : -1));
-        spot.target = g;
-        scene.add(spot);
+          // Reflector housing — tapered cylinder
+          const hous=new T.Mesh(new T.CylinderGeometry(0.028,0.095,0.22,20,1,true),coneM);
+          hous.position.y=-0.435; g.add(hous);
 
-        scene.add(g);
-        hitGroups.push(g);
+          // Top cap
+          const topCap=new T.Mesh(new T.CircleGeometry(0.028,20),coneM);
+          topCap.rotation.x=Math.PI/2; topCap.position.y=-0.325; g.add(topCap);
 
-        loader.load(ph.url, (t) => {
-          t.colorSpace = window.THREE.SRGBColorSpace;
-          imgMesh.material = new window.THREE.MeshBasicMaterial({ map: t });
-        }, undefined, () => {
-          // صورة احتياطية في حال فشل التحميل
+          // Inner reflector (slightly lighter)
+          const refM=new T.MeshStandardMaterial({color:0x303040,roughness:0.05,metalness:0.99});
+          const ref=new T.Mesh(new T.CylinderGeometry(0.026,0.088,0.21,20,1,true),refM);
+          ref.position.y=-0.434; g.add(ref);
+
+          // Lens
+          const lens=new T.Mesh(new T.CircleGeometry(0.075,24),lensM);
+          lens.rotation.x=Math.PI/2; lens.position.y=-0.548; g.add(lens);
+
+          // Outer lens ring
+          const lRing=new T.Mesh(new T.TorusGeometry(0.08,0.008,8,24),coneM);
+          lRing.rotation.x=Math.PI/2; lRing.position.y=-0.548; g.add(lRing);
+
+          scene.add(g);
+
+          // Spotlight
+          const spot=new T.SpotLight(0xfff6e0,3.2,16,Math.PI/7.5,0.25,1.4);
+          spot.position.set(rx,RH-0.56,rz);
+          spot.target.position.set(rx,0,rz);
+          spot.castShadow=true;
+          spot.shadow.mapSize.set(512,512);
+          spot.shadow.bias=-0.002;
+          scene.add(spot); scene.add(spot.target);
         });
       });
 
-      const joyZone = document.getElementById('joyZone');
-      const joyKnob = document.getElementById('joyKnob');
+      // ── LIGHTING ─────────────────────────────────────
+      const ambient=new THREE.AmbientLight(0xfff8f0,0.55);
+      scene.add(ambient);
+      const hem=new THREE.HemisphereLight(0xfff5e8,0xc8bfb0,0.4);
+      scene.add(hem);
 
-      renderer.domElement.addEventListener('touchstart', (e) => {
-        for (const t of e.changedTouches) {
-          if (t.clientX < window.innerWidth * 0.45 && !state.joy.a) {
-            state.joy.a = true;
-            state.joy.id = t.identifier;
-            if (joyZone) {
-              const r = joyZone.getBoundingClientRect();
-              state.joy.cx = r.left + r.width / 2;
-              state.joy.cy = r.top + r.height / 2;
-            }
-          } else if (!state.look.a) {
-            state.look.a = true;
-            state.look.id = t.identifier;
-            state.look.lx = t.clientX;
-            state.look.ly = t.clientY;
-          }
-          state.tap[t.identifier] = { x: t.clientX, y: t.clientY, moved: false };
-        }
-      }, { passive: true });
+      // Soft fill from entrance
+      const fill=new THREE.PointLight(0xfff8f0,0.8,25,2);
+      fill.position.set(0,3,13); scene.add(fill);
 
-      renderer.domElement.addEventListener('touchmove', (e) => {
-        for (const t of e.changedTouches) {
-          const tp = state.tap[t.identifier];
-          if (tp && Math.hypot(t.clientX - tp.x, t.clientY - tp.y) > 8) tp.moved = true;
-          if (state.joy.a && t.identifier === state.joy.id) {
-            let dx = t.clientX - state.joy.cx, dy = t.clientY - state.joy.cy;
-            const max = 40, len = Math.hypot(dx, dy);
-            if (len > max) { dx = dx / len * max; dy = dy / len * max; }
-            state.joy.dx = dx / max;
-            state.joy.dy = dy / max;
-            if (joyKnob) {
-              joyKnob.style.left = (31 + dx) + 'px';
-              joyKnob.style.top = (31 + dy) + 'px';
-            }
-          }
-          if (state.look.a && t.identifier === state.look.id) {
-            state.yaw -= (t.clientX - state.look.lx) * 0.0035;
-            state.pitch -= (t.clientY - state.look.ly) * 0.0035;
-            state.pitch = Math.max(-1, Math.min(1, state.pitch));
-            state.look.lx = t.clientX;
-            state.look.ly = t.clientY;
-          }
-        }
-      }, { passive: true });
+      // ── BENCHES (realistic wood+steel) ───────────────
+      const benchWoodTex=new T.CanvasTexture(makeWoodFrameTexture(256,64,FRAME_STYLES[1]));
+      benchWoodTex.wrapS=benchWoodTex.wrapT=T.RepeatWrapping;
+      benchWoodTex.repeat.set(3,1);
+      const benchSeatM=new T.MeshStandardMaterial({map:benchWoodTex,roughness:0.6,metalness:0.02});
+      const benchLegM =new T.MeshStandardMaterial({color:0x1a1a24,roughness:0.15,metalness:0.9});
+      const benchStrM =new T.MeshStandardMaterial({color:0x222230,roughness:0.12,metalness:0.95});
 
-      renderer.domElement.addEventListener('touchend', (e) => {
-        for (const t of e.changedTouches) {
-          const tp = state.tap[t.identifier];
-          if (tp && !tp.moved) {
-            triggerRaycast(t.clientX, t.clientY);
-          }
-          delete state.tap[t.identifier];
-          if (state.joy.a && t.identifier === state.joy.id) {
-            state.joy.a = false;
-            state.joy.dx = 0; state.joy.dy = 0;
-            if (joyKnob) {
-              joyKnob.style.left = '31px';
-              joyKnob.style.top = '31px';
-            }
-          }
-          if (state.look.a && t.identifier === state.look.id) state.look.a = false;
+      [[0,0],[0,-12],[0,12],[-8,0],[8,0]].forEach(([bx,bz])=>{
+        const g=new THREE.Group(); g.position.set(bx,0,bz);
+
+        // Seat — three planks
+        [0].forEach(()=>{
+          [-0.14,0,0.14].forEach((oz,pi)=>{
+            const plank=new T.Mesh(new T.BoxGeometry(1.92,0.055,0.15),benchSeatM);
+            plank.position.set(0,0.465,oz); plank.castShadow=plank.receiveShadow=true;
+            g.add(plank);
+          });
+        });
+
+        // H-frame legs
+        [[-0.78],[0.78]].forEach(([lx])=>{
+          // Vertical uprights
+          const upM=new T.Mesh(new T.BoxGeometry(0.04,0.48,0.46),benchLegM);
+          upM.position.set(lx,0.24,0); upM.castShadow=true; g.add(upM);
+          // Foot pads
+          [-0.2,0.2].forEach(fz=>{
+            const foot=new T.Mesh(new T.BoxGeometry(0.055,0.02,0.065),benchStrM);
+            foot.position.set(lx,0.01,fz); g.add(foot);
+          });
+        });
+        // Cross stretcher
+        const str=new T.Mesh(new T.BoxGeometry(1.58,0.03,0.03),benchStrM);
+        str.position.y=0.12; g.add(str);
+
+        scene.add(g);
+      });
+    };
+
+    // ══════════════════════════════════════════════════
+    //  ARTWORKS — realistic wooden frames
+    // ══════════════════════════════════════════════════
+    const buildArtworks=async(T,hits)=>{
+      const photoMap={};
+      photos.forEach(p=>{ photoMap[p.position_index]=p; });
+      for(const slot of SLOTS) await buildSlot(T, slot, photoMap[slot.id], hits);
+    };
+
+    const buildSlot=(T,slot,ph,hits)=>new Promise(resolve=>{
+      const group=new T.Group();
+      group.position.set(...slot.pos);
+      group.rotation.y=slot.rotY;
+      const style=FRAME_STYLES[slot.id%FRAME_STYLES.length];
+
+      const finalize=(fw,fh,photoTex,hasPhoto)=>{
+        buildRealisticFrame(T,group,fw,fh,style);
+        addArtwork(T,group,fw,fh,photoTex);
+        addRealisticPictureLight(T,group,fw,fh,hasPhoto,style);
+        addSlotLabel(T,group,slot.id,fw,fh,hasPhoto);
+        group.userData={title:ph?.title||'',sub:ph?.subtitle||'',hasPhoto};
+        if(hasPhoto) hits.push(group);
+        scene.add(group); resolve();
+      };
+
+      if(ph?.image_url){
+        const img=new Image(); img.crossOrigin='anonymous';
+        img.onload=()=>{
+          const asp=img.naturalWidth/img.naturalHeight;
+          const mH=1.9, mW=2.7;
+          const fw=asp>=1?Math.min(mW,asp*mH):mH*asp;
+          const fh=asp>=1?fw/asp:mH;
+          const cv=document.createElement('canvas');
+          cv.width=img.naturalWidth; cv.height=img.naturalHeight;
+          cv.getContext('2d').drawImage(img,0,0);
+          const tex=new T.CanvasTexture(cv);
+          tex.colorSpace=T.SRGBColorSpace||'srgb';
+          finalize(fw,fh,tex,true);
+        };
+        img.onerror=()=>finalize(1.8,1.35,makePlaceholderTex(T,slot.id,style),false);
+        img.src=ph.image_url;
+      } else {
+        finalize(1.8,1.35,makePlaceholderTex(T,slot.id,style),false);
+      }
+    });
+
+    // Build a realistic multi-piece wooden frame
+    const buildRealisticFrame=(T,group,fw,fh,style)=>{
+      const bw=0.12;  // border width of frame bar
+      const fd=0.055; // frame depth (extrusion)
+      const br=0.01;  // bevel rounding
+
+      // Wood texture for frame face
+      const woodTex=new T.CanvasTexture(makeWoodFrameTexture(256,64,style));
+      const faceMat=new T.MeshStandardMaterial({
+        map:woodTex, roughness:0.55, metalness:style.name==='gold'||style.name==='silver'?0.6:0.02,
+        color:style.name==='gold'?0xffd060:style.name==='silver'?0xd8d8d8:0xffffff,
+      });
+      const sideMat=new T.MeshStandardMaterial({
+        color:style.dark, roughness:0.65, metalness:style.name==='gold'||style.name==='silver'?0.5:0.01,
+      });
+      const mats=[sideMat,sideMat,sideMat,sideMat,faceMat,sideMat];
+
+      // Build frame from 4 bars with mitered look
+      const bars=[
+        // top
+        {w:fw+bw*2, h:bw, d:fd, x:0,       y: fh/2+bw/2, z:0},
+        // bottom
+        {w:fw+bw*2, h:bw, d:fd, x:0,       y:-fh/2-bw/2, z:0},
+        // left
+        {w:bw, h:fh,      d:fd, x:-fw/2-bw/2, y:0,        z:0},
+        // right
+        {w:bw, h:fh,      d:fd, x: fw/2+bw/2, y:0,        z:0},
+      ];
+
+      bars.forEach(b=>{
+        const geo=new T.BoxGeometry(b.w,b.h,b.d);
+        const mesh=new T.Mesh(geo,mats);
+        mesh.position.set(b.x,b.y,b.z+fd/2);
+        mesh.castShadow=true; mesh.receiveShadow=true;
+        group.add(mesh);
+
+        // Inner chamfer strip (shadow gap)
+        const chamM=new T.MeshStandardMaterial({color:0x0a0a0a,roughness:1});
+        if(b.h===bw){ // horizontal
+          const cham=new T.Mesh(new T.BoxGeometry(b.w,0.012,0.02),chamM);
+          cham.position.set(b.x, b.y+(b.y>0?-bw/2:bw/2), b.z+fd+0.001); group.add(cham);
+        } else { // vertical
+          const cham=new T.Mesh(new T.BoxGeometry(0.012,b.h,0.02),chamM);
+          cham.position.set(b.x+(b.x<0?bw/2:-bw/2), b.y, b.z+fd+0.001); group.add(cham);
         }
       });
 
-      renderer.domElement.addEventListener('click', (e) => {
-        triggerRaycast(e.clientX, e.clientY);
+      // Back panel (thin board behind artwork)
+      const backM=new T.MeshStandardMaterial({color:0x1a1408,roughness:0.85});
+      const back=new T.Mesh(new T.BoxGeometry(fw+bw*2+0.01,fh+bw*2+0.01,0.01),backM);
+      back.position.z=-0.002; group.add(back);
+
+      // White mat (passepartout) - thin inset border
+      const matW=0.045;
+      const matPieces=[
+        {w:fw+matW*2,h:matW,x:0,           y: fh/2+matW/2},
+        {w:fw+matW*2,h:matW,x:0,           y:-fh/2-matW/2},
+        {w:matW,h:fh,       x:-fw/2-matW/2,y:0},
+        {w:matW,h:fh,       x: fw/2+matW/2,y:0},
+      ];
+      const matM=new T.MeshStandardMaterial({color:0xf5f2ee,roughness:0.9});
+      matPieces.forEach(p=>{
+        const mesh=new T.Mesh(new T.BoxGeometry(p.w,p.h,0.008),matM);
+        mesh.position.set(p.x,p.y,fd+0.005); group.add(mesh);
+      });
+    };
+
+    const addArtwork=(T,group,fw,fh,tex)=>{
+      const imgMesh=new T.Mesh(
+        new T.PlaneGeometry(fw,fh),
+        new T.MeshStandardMaterial({map:tex,roughness:0.78,metalness:0})
+      );
+      imgMesh.position.z=0.06; group.add(imgMesh);
+    };
+
+    const addRealisticPictureLight=(T,group,fw,fh,lit,style)=>{
+      const brass=new T.MeshStandardMaterial({color:0xb8982a,roughness:0.12,metalness:0.94});
+      const dark =new T.MeshStandardMaterial({color:0x08080e,roughness:0.06,metalness:0.98});
+      const glowM=new T.MeshStandardMaterial({color:0xfff9d0,emissive:0xfff9d0,emissiveIntensity:lit?2.2:0.15,roughness:0,metalness:0});
+      const matteM=new T.MeshStandardMaterial({color:0x1a1a22,roughness:0.4,metalness:0.7});
+
+      const g=new T.Group(); g.position.set(0,fh/2+0.195,0.11);
+
+      // Wall bracket
+      const brack=new T.Mesh(new T.BoxGeometry(fw*0.42,0.04,0.03),brass);
+      g.add(brack);
+      // Bracket screws (decorative)
+      [-fw*0.16,fw*0.16].forEach(bx=>{
+        const screw=new T.Mesh(new T.CylinderGeometry(0.008,0.008,0.01,8),brass);
+        screw.rotation.x=Math.PI/2; screw.position.set(bx,0,0.02); g.add(screw);
       });
 
-      function triggerRaycast(clientX, clientY) {
-        const ray = new window.THREE.Raycaster();
-        const ndc = new window.THREE.Vector2((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
-        ray.setFromCamera(ndc, camera);
-        const hits = ray.intersectObjects(hitGroups, true);
-        if (hits.length) {
-          let o = hits[0].object;
-          while (o && !o.userData.title) o = o.parent;
-          if (o && o.userData.title) openFS(o.userData);
-        }
-      }
+      // Arm pivots out
+      const arm=new T.Mesh(new T.CylinderGeometry(0.009,0.009,0.14,8),brass);
+      arm.rotation.x=Math.PI/2; arm.position.z=0.07; g.add(arm);
 
-      function openFS(d) {
-        fullscreenOpen = true;
-        const fsOverlay = document.getElementById('fsOverlay');
-        const fsImg = document.getElementById('fsImg');
-        const fsTitle = document.getElementById('fsTitle');
-        const fsMeta = document.getElementById('fsMeta');
-        if (fsOverlay && fsImg) {
-          fsImg.src = d.url;
-          fsTitle.textContent = d.title;
-          fsMeta.textContent = `${d.ph} • ${d.cam} • ${d.yr}`;
-          fsOverlay.classList.add('open');
-        }
-      }
+      // Pivot ball
+      const ball=new T.Mesh(new T.SphereGeometry(0.016,10,10),brass);
+      ball.position.z=0.14; g.add(ball);
 
-      window.addEventListener('resize', () => {
-        if (!camera || !renderer) return;
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
+      // Shade tube (half-cylinder) — open face downward toward painting
+      const shadeLen=fw*0.40;
+      const shade=new T.Mesh(
+        new T.CylinderGeometry(0.042,0.072,shadeLen,20,1,true,0,Math.PI), dark);
+      shade.rotation.set(-Math.PI/2,0,Math.PI/2); // open side down
+      shade.position.z=0.155; g.add(shade);
+
+      // Shade end caps (thin box approximation)
+      [-shadeLen/2,shadeLen/2].forEach(ex=>{
+        const ecb=new T.Mesh(new T.BoxGeometry(0.004,0.072,0.072),dark);
+        ecb.position.set(ex,0.028,0.155); g.add(ecb);
       });
 
-      function animate() {
-        requestAnimationFrame(animate);
-        if (!camera) return;
-        camera.rotation.y = state.yaw;
-        camera.rotation.x = state.pitch;
+      // Inner reflector
+      const refl=new T.Mesh(
+        new T.CylinderGeometry(0.038,0.068,shadeLen,20,1,true,0,Math.PI),
+        new T.MeshStandardMaterial({color:0xd8d0b0,roughness:0.05,metalness:0.9}));
+      refl.rotation.set(-Math.PI/2,0,Math.PI/2);
+      refl.position.z=0.154; g.add(refl);
 
-        if (!fullscreenOpen) {
-          if (state.joy.a) {
-            const dir = new window.THREE.Vector3(state.joy.dx, 0, state.joy.dy).applyQuaternion(camera.quaternion);
-            dir.y = 0;
-            if (dir.lengthSq() > 0) dir.normalize();
-            camera.position.add(dir.multiplyScalar(0.08));
+      // Glowing tube inside
+      const glow=new T.Mesh(new T.CylinderGeometry(0.007,0.007,shadeLen*0.9,8),glowM);
+      glow.rotation.set(0,0,Math.PI/2); glow.position.set(0,0.028,0.155); g.add(glow);
+
+      group.add(g);
+
+      if(lit){
+        const pl=new T.SpotLight(0xfff5b8,5.5,6.5,Math.PI/8.5,0.22,2.0);
+        pl.position.set(0,fh/2+0.3,0.3);
+        pl.target.position.set(0,-fh*0.28,0.06);
+        pl.castShadow=false;
+        group.add(pl); group.add(pl.target);
+      }
+    };
+
+    const makePlaceholderTex=(T,slotId,style)=>{
+      const cv=document.createElement('canvas'); cv.width=600; cv.height=450;
+      const ctx=cv.getContext('2d');
+      // Subtle linen texture
+      ctx.fillStyle='#f0ece4'; ctx.fillRect(0,0,600,450);
+      for(let i=0;i<4000;i++){
+        ctx.fillStyle=`rgba(${150+Math.random()*30},${140+Math.random()*20},${120+Math.random()*20},${Math.random()*0.06})`;
+        ctx.fillRect(Math.random()*600,Math.random()*450,Math.random()*2,Math.random()*2);
+      }
+      // Dashed border
+      ctx.strokeStyle='rgba(160,148,130,0.4)'; ctx.lineWidth=1.5; ctx.setLineDash([10,8]);
+      ctx.strokeRect(22,22,556,406);
+      // Slot number
+      const c='#'+style.color.toString(16).padStart(6,'0');
+      ctx.fillStyle=c+'55';
+      ctx.beginPath(); ctx.arc(300,200,65,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(80,68,50,0.45)'; ctx.font='bold 70px Georgia,serif'; ctx.textAlign='center';
+      ctx.fillText(slotId.toString(),300,218);
+      ctx.fillStyle='rgba(140,128,110,0.5)'; ctx.font='italic 20px Georgia,serif';
+      ctx.fillText('موقع رقم '+slotId,300,265);
+      return new T.CanvasTexture(cv);
+    };
+
+    const addSlotLabel=(T,group,slotId,fw,fh,hasPhoto)=>{
+      const cv=document.createElement('canvas'); cv.width=160; cv.height=56;
+      const ctx=cv.getContext('2d');
+      // Pill shape
+      ctx.fillStyle=hasPhoto?'rgba(26,26,36,0.88)':'rgba(100,95,88,0.7)';
+      ctx.beginPath(); ctx.roundRect(0,0,160,56,28); ctx.fill();
+      // Shine
+      const shine=ctx.createLinearGradient(0,0,0,28);
+      shine.addColorStop(0,'rgba(255,255,255,0.12)'); shine.addColorStop(1,'rgba(255,255,255,0)');
+      ctx.fillStyle=shine; ctx.beginPath(); ctx.roundRect(0,0,160,28,28); ctx.fill();
+      // Text
+      ctx.fillStyle=hasPhoto?'#ffffff':'#d8d0c4';
+      ctx.font='bold 26px -apple-system,Segoe UI,sans-serif'; ctx.textAlign='center';
+      ctx.fillText('#'+slotId,80,37);
+      const tex=new T.CanvasTexture(cv);
+      const sprite=new T.Mesh(new T.PlaneGeometry(0.5,0.175),
+        new T.MeshStandardMaterial({map:tex,transparent:true,roughness:1,depthWrite:false}));
+      sprite.position.set(0,fh/2+0.6,0.08); group.add(sprite);
+    };
+
+    // ══════════════════════════════════════════════════
+    //  CONTROLS
+    // ══════════════════════════════════════════════════
+    const setupControls=(rdr)=>{
+      document.addEventListener('keydown',e=>{s.keys[e.code]=true;});
+      document.addEventListener('keyup',  e=>{s.keys[e.code]=false;});
+      if(!isMobile){
+        rdr.domElement.addEventListener('click',()=>rdr.domElement.requestPointerLock());
+        document.addEventListener('pointerlockchange',()=>{
+          s.isLocked=document.pointerLockElement===rdr.domElement; setLocked(s.isLocked);
+        });
+        document.addEventListener('mousemove',e=>{
+          if(!s.isLocked) return;
+          s.yaw  -=e.movementX*0.0018; s.pitch-=e.movementY*0.0018;
+          s.pitch=Math.max(-1.1,Math.min(1.1,s.pitch));
+        });
+      } else {
+        // Mobile look
+        rdr.domElement.addEventListener('touchstart',e=>{
+          e.preventDefault();
+          for(const t of e.changedTouches){
+            if(t.clientX>innerWidth/2&&!s.lookTouch.active)
+              s.lookTouch={active:true,id:t.identifier,lastX:t.clientX,lastY:t.clientY};
           }
-
-          let near = null, minDist = Infinity;
-          for (const g of hitGroups) {
-            const d = camera.position.distanceTo(g.position);
-            if (d < minDist) { minDist = d; near = g; }
-          }
-
-          const infoGlass = document.getElementById('infoGlass');
-          const infoTitle = document.getElementById('infoTitle');
-          const infoPhotographer = document.getElementById('infoPhotographer');
-          const infoCamera = document.getElementById('infoCamera');
-          const infoYear = document.getElementById('infoYear');
-          const infoLocation = document.getElementById('infoLocation');
-
-          if (near && minDist <= SHOW_DIST) {
-            if (panelTarget !== near.userData) {
-              panelTarget = near.userData;
-              if (infoTitle) infoTitle.textContent = near.userData.title;
-              if (infoPhotographer) infoPhotographer.textContent = near.userData.ph;
-              if (infoCamera) infoCamera.textContent = near.userData.cam;
-              if (infoYear) infoYear.textContent = near.userData.yr;
-              if (infoLocation) infoLocation.textContent = near.userData.loc;
+        },{passive:false});
+        rdr.domElement.addEventListener('touchmove',e=>{
+          e.preventDefault();
+          for(const t of e.changedTouches){
+            if(t.identifier===s.lookTouch.id){
+              s.yaw  -=(t.clientX-s.lookTouch.lastX)*0.004;
+              s.pitch-=(t.clientY-s.lookTouch.lastY)*0.004;
+              s.pitch=Math.max(-1.1,Math.min(1.1,s.pitch));
+              s.lookTouch.lastX=t.clientX; s.lookTouch.lastY=t.clientY;
             }
-            if (infoGlass) infoGlass.classList.add('visible');
-          } else {
-            if (infoGlass) infoGlass.classList.remove('visible', 'expanded');
-            panelTarget = null;
           }
-        }
-        renderer.render(scene, camera);
+        },{passive:false});
+        rdr.domElement.addEventListener('touchend',e=>{
+          for(const t of e.changedTouches)
+            if(t.identifier===s.lookTouch.id)
+              s.lookTouch={active:false,id:null,lastX:0,lastY:0};
+        });
       }
-      animate();
-    }
-  }, [photos]);
+    };
 
-  const handleEnter = () => {
-    const entry = document.getElementById('entryOverlay');
-    const joyWrap = document.getElementById('joyWrap');
-    const lookHint = document.getElementById('lookHintMobile');
-    if (entry) entry.style.display = 'none';
-    if (joyWrap) joyWrap.style.display = 'block';
-    if (lookHint) lookHint.style.display = 'block';
-  };
+    // ══════════════════════════════════════════════════
+    //  ANIMATION
+    // ══════════════════════════════════════════════════
+    const animate=(T,hits)=>{
+      const rc=new T.Raycaster(); let last=performance.now();
+      const loop=()=>{
+        animId=requestAnimationFrame(loop);
+        const now=performance.now(), dt=Math.min((now-last)/1000,0.05); last=now;
+        const active=s.isLocked||isMobile;
+        if(active){
+          const spd=s.keys['ShiftLeft']?7:4;
+          const fw3=new T.Vector3(-Math.sin(s.yaw),0,-Math.cos(s.yaw));
+          const rt3=new T.Vector3( Math.cos(s.yaw),0,-Math.sin(s.yaw));
+          const mv=new T.Vector3();
+          if(s.keys['KeyW']||s.keys['ArrowUp'])    mv.addScaledVector(fw3, spd*dt);
+          if(s.keys['KeyS']||s.keys['ArrowDown'])  mv.addScaledVector(fw3,-spd*dt);
+          if(s.keys['KeyA']||s.keys['ArrowLeft'])  mv.addScaledVector(rt3,-spd*dt);
+          if(s.keys['KeyD']||s.keys['ArrowRight']) mv.addScaledVector(rt3, spd*dt);
+          if(s.joystick.active){
+            mv.addScaledVector(fw3,-s.joystick.dy/40*3.5*dt);
+            mv.addScaledVector(rt3, s.joystick.dx/40*3.5*dt);
+          }
+          camera.position.add(mv);
+          camera.position.x=Math.max(-10.3,Math.min(10.3,camera.position.x));
+          camera.position.z=Math.max(-16.3,Math.min(16.3,camera.position.z));
+          camera.position.y=1.72;
+          camera.rotation.order='YXZ';
+          camera.rotation.y=s.yaw; camera.rotation.x=s.pitch;
 
-  const handleCloseFS = () => {
-    const fsOverlay = document.getElementById('fsOverlay');
-    if (fsOverlay) fsOverlay.classList.remove('open');
-  };
+          rc.setFromCamera({x:0,y:0},camera);
+          const hh=rc.intersectObjects(hits,true);
+          if(hh.length&&hh[0].distance<5.5){
+            let obj=hh[0].object;
+            while(obj&&!obj.userData?.hasPhoto) obj=obj.parent;
+            if(obj?.userData?.hasPhoto) setPhotoInfo({title:obj.userData.title,sub:obj.userData.sub});
+            else setPhotoInfo(null);
+          } else setPhotoInfo(null);
+        }
+        renderer.render(scene,camera);
+      };
+      loop();
+    };
 
-  const handleToggleGlass = (e) => {
-    e.stopPropagation();
-    const infoGlass = document.getElementById('infoGlass');
-    if (infoGlass) infoGlass.classList.toggle('expanded');
-  };
+    window.addEventListener('resize',()=>{
+      if(!camera||!renderer) return;
+      camera.aspect=innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth,innerHeight);
+    });
 
-  return (
+    init();
+    return()=>{
+      cancelAnimationFrame(animId);
+      document.exitPointerLock?.();
+      renderer?.dispose();
+      if(mountRef.current&&renderer?.domElement?.parentNode===mountRef.current)
+        mountRef.current.removeChild(renderer.domElement);
+    };
+  },[entered,photos]);
+
+  // Joystick handlers
+  const onJoyStart=useCallback(e=>{
+    e.preventDefault();
+    stateRef.current.joystick={active:true,dx:0,dy:0};
+    if(joystickKnobRef.current) joystickKnobRef.current.style.transform='translate(-50%,-50%)';
+  },[]);
+  const onJoyMove=useCallback(e=>{
+    e.preventDefault();
+    const s=stateRef.current; if(!s.joystick.active) return;
+    const t=e.changedTouches[0];
+    const zone=joystickZoneRef.current?.getBoundingClientRect(); if(!zone) return;
+    const cx=zone.left+zone.width/2, cy=zone.top+zone.height/2;
+    let dx=t.clientX-cx, dy=t.clientY-cy;
+    const maxR=42, dist=Math.sqrt(dx*dx+dy*dy);
+    if(dist>maxR){dx=dx/dist*maxR;dy=dy/dist*maxR;}
+    s.joystick.dx=dx; s.joystick.dy=dy;
+    if(joystickKnobRef.current)
+      joystickKnobRef.current.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`;
+  },[]);
+  const onJoyEnd=useCallback(e=>{
+    e.preventDefault();
+    stateRef.current.joystick={active:false,dx:0,dy:0};
+    if(joystickKnobRef.current) joystickKnobRef.current.style.transform='translate(-50%,-50%)';
+  },[]);
+
+  useEffect(()=>{
+    const zone=joystickZoneRef.current;
+    if(!zone||!entered) return;
+    zone.addEventListener('touchstart',onJoyStart,{passive:false});
+    zone.addEventListener('touchmove', onJoyMove, {passive:false});
+    zone.addEventListener('touchend',  onJoyEnd,  {passive:false});
+    return()=>{
+      zone.removeEventListener('touchstart',onJoyStart);
+      zone.removeEventListener('touchmove', onJoyMove);
+      zone.removeEventListener('touchend',  onJoyEnd);
+    };
+  },[entered,onJoyStart,onJoyMove,onJoyEnd]);
+
+  // ── UI ────────────────────────────────────────────────────────
+  return(
     <>
       <Head>
-        <title>معرض الفوتوغرافيا الافتراضي — Modern Hall</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+        <title>معرض الفوتوغرافيا الافتراضي</title>
+        <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
       </Head>
+      <div ref={mountRef} style={{width:'100vw',height:'100dvh',touchAction:'none'}}/>
 
-      <div id="canvasHost" style={{ position: 'fixed', inset: 0, touchAction: 'none' }}></div>
-      
-      {/* واجهة الدخول */}
-      <div id="entryOverlay" style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'radial-gradient(circle at 50% 30%, #201b17 0%, #080706 70%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#eee' }}>
-        <div style={{ textAlign: 'center', padding: '40px 36px', width: 'min(90vw, 420px)' }}>
-          <div style={{ fontSize: '42px', color: '#c9a35b', marginBottom: '6px' }}>✦</div>
-          <h1 style={{ fontSize: '22px', letterSpacing: '.25em', fontWeight: 300, color: '#f3efe8', marginBottom: '10px' }}>MODERN GALLERY</h1>
-          <p style={{ color: '#9a9388', fontSize: '14px', lineHeight: 1.8, marginBottom: '28px' }}>
-            معرض الفوتوغرافيا الافتراضي الحديث <br />جمعية الثقافة والفنون بالطائف
-          </p>
-          <button onClick={handleEnter} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #c9a35b, #9c7a3c)', color: '#1a1408', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 600, cursor: 'pointer' }}>
-            دخول المعرض ←
-          </button>
+      {/* Loading */}
+      {entered&&loading&&(
+        <div style={{position:'fixed',inset:0,zIndex:300,background:'#e8e2da',
+          display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+          fontFamily:'Georgia,serif'}}>
+          <div style={{width:52,height:52,border:'2px solid #c8bfb0',borderTopColor:'#8a7a60',
+            borderRadius:'50%',animation:'spin 1s linear infinite',marginBottom:20}}/>
+          <p style={{color:'#6a6050',letterSpacing:'0.2em',fontSize:'0.85rem'}}>جاري تحميل المعرض...</p>
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
         </div>
-      </div>
+      )}
 
-      {/* لوحة معلومات الصورة */}
-      <div className="info-glass" id="infoGlass" onClick={handleToggleGlass} style={{ position: 'fixed', top: '50%', right: '20px', transform: 'translateY(-50%)', width: '270px', borderRadius: '16px', background: 'rgba(255, 255, 255, 0.08)', backdropFilter: 'blur(16px)', padding: '16px', zIndex: 250, color: '#f3efe8', opacity: 0, pointerEvents: 'none', transition: 'opacity .4s ease' }}>
-        <div className="info-hint" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
-          <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#c9a35b' }}></span>
-          <span>اضغط لتفاصيل الصورة</span>
-        </div>
-        <div className="info-body" style={{ display: 'none', cursor: 'pointer' }}>
-          <h3 id="infoTitle" style={{ fontSize: '16px', color: '#c9a35b', marginBottom: '10px', borderBottom: '1px solid rgba(201, 163, 91, .2)', paddingBottom: '5px' }}>—</h3>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '5px 0' }}><span style={{ color: '#8f887c' }}>المصور:</span><span id="infoPhotographer">—</span></div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '5px 0' }}><span style={{ color: '#8f887c' }}>الكاميرا:</span><span id="infoCamera">—</span></div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '5px 0' }}><span style={{ color: '#8f887c' }}>السنة:</span><span id="infoYear">—</span></div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '5px 0' }}><span style={{ color: '#8f887c' }}>الموقع:</span><span id="infoLocation">—</span></div>
-        </div>
-      </div>
+      {/* Entry */}
+      {!entered&&(
+        <div style={{position:'fixed',inset:0,zIndex:200,
+          background:'linear-gradient(160deg,#f2ede6 0%,#e8e2da 50%,#dfd8cf 100%)',
+          display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+          fontFamily:'Georgia,serif',padding:20,overflowY:'auto'}}>
 
-      {/* شاشة العرض الكامل للصورة */}
-      <div className="fs-overlay" id="fsOverlay" onClick={(e) => e.target.id === 'fsOverlay' && handleCloseFS()} style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0, 0, 0, .94)', display: 'none', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: '20px' }}>
-        <button onClick={handleCloseFS} style={{ position: 'fixed', top: '20px', right: '20px', zIndex: 2100, background: 'rgba(201, 163, 91, .25)', color: '#f3efe8', border: '1px solid rgba(201, 163, 91, .5)', padding: '10px 20px', borderRadius: '30px', cursor: 'pointer' }}>
-          ↩ رجوع للمعرض
-        </button>
-        <img id="fsImg" src="" alt="" style={{ maxWidth: '90vw', maxHeight: '75vh', objectFit: 'contain', borderRadius: '4px' }} />
-        <div style={{ textAlign: 'center', marginTop: '16px', color: '#f3efe8' }}>
-          <h2 id="fsTitle" style={{ fontSize: '19px', color: '#c9a35b', marginBottom: '4px' }}></h2>
-          <p id="fsMeta" style={{ fontSize: '13px', color: '#a79f8f' }}></p>
-        </div>
-      </div>
+          {/* Decorative arcs */}
+          {[[-180,-120,240],[ 160,140,190],[-100,180,160],[150,-200,170]].map(([x,y,s],i)=>(
+            <div key={i} style={{position:'absolute',left:`calc(50% + ${x}px)`,top:`calc(50% + ${y}px)`,
+              width:s,height:s,borderRadius:'50%',border:'1px solid rgba(160,140,110,0.18)',
+              transform:'translate(-50%,-50%)'}}/>
+          ))}
 
-      {/* أداة التحكم (Joystick) */}
-      <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, display: 'none' }}>
-        <div id="joyZone" style={{ width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(255, 255, 255, .08)', border: '1px solid rgba(255, 255, 255, .18)', position: 'relative', touchAction: 'none' }}>
-          <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .8)', position: 'absolute', top: '31px', left: '31px', pointerEvents: 'none' }}></div>
-        </div>
-      </div>
+          <div style={{position:'relative',textAlign:'center',maxWidth:440,width:'100%'}}>
+            {/* Logo mark */}
+            <div style={{width:48,height:48,margin:'0 auto 20px',
+              border:'1.5px solid #a09078',display:'flex',alignItems:'center',justifyContent:'center'}}>
+              <div style={{width:24,height:24,background:'#8a7860'}}/>
+            </div>
 
-      <div id="lookHintMobile" style={{ position: 'fixed', right: '20px', bottom: '26px', zIndex: 300, display: 'none', color: 'rgba(255, 255, 255, .7)', fontSize: '12px', background: 'rgba(0, 0, 0, .5)', padding: '8px 12px', borderRadius: '8px', pointerEvents: 'none' }}>
-        اسحب في أي مكان للتجول • انقر اللوحة لتكبيرها
-      </div>
+            <h1 style={{fontSize:'clamp(1.8rem,7vw,2.8rem)',fontWeight:400,letterSpacing:'0.35em',
+              color:'#2a2218',marginBottom:4,fontFamily:'Georgia,serif'}}>
+              GALLERY
+            </h1>
+            <div style={{width:48,height:1,background:'#a09078',margin:'10px auto 10px'}}/>
+            <p style={{color:'#8a7a68',fontSize:'clamp(0.78rem,2.5vw,0.9rem)',letterSpacing:'0.18em',
+              marginBottom:6,fontFamily:'Segoe UI,Tahoma,sans-serif'}}>
+              معرض الفوتوغرافيا الافتراضي
+            </p>
+            <p style={{color:'#b0a090',fontSize:'0.78rem',marginBottom:36,
+              fontFamily:'Segoe UI,Tahoma,sans-serif'}}>
+              {photos.length} عمل فني · 15 موقع عرض
+            </p>
+
+            <button onClick={()=>setEntered(true)} style={{
+              background:'#2a2218',color:'#f5f0e8',border:'none',
+              padding:'15px 52px',fontSize:'0.88rem',letterSpacing:'0.22em',
+              cursor:'pointer',fontFamily:'Segoe UI,Tahoma,sans-serif',
+              transition:'all .3s',WebkitTapHighlightColor:'transparent',
+            }}
+              onMouseEnter={e=>{e.target.style.background='#8a7860';e.target.style.letterSpacing='0.28em';}}
+              onMouseLeave={e=>{e.target.style.background='#2a2218';e.target.style.letterSpacing='0.22em';}}
+            >دخول المعرض</button>
+
+            <div style={{marginTop:30,display:'flex',gap:12,justifyContent:'center',flexWrap:'wrap'}}>
+              {(isMobile
+                ?[['↕↔ يسار','تحرك'],['سحب يمين','انظر']]
+                :[['W A S D','التحرك'],['ماوس','النظر'],['Shift','ركض'],['ESC','إيقاف']]
+              ).map(([k,l])=>(
+                <div key={k} style={{textAlign:'center'}}>
+                  <div style={{background:'rgba(255,252,248,0.8)',border:'1px solid #d8d0c4',
+                    padding:'5px 11px',fontSize:'0.73rem',color:'#3a3020',
+                    fontFamily:'monospace',marginBottom:3}}>{k}</div>
+                  <div style={{fontSize:'0.65rem',color:'#a09080',fontFamily:'Segoe UI,Tahoma,sans-serif'}}>{l}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{marginTop:32,paddingTop:20,borderTop:'1px solid #d8d0c4'}}>
+              <a href="/admin/login" style={{
+                color:'#a09078',fontSize:'0.75rem',letterSpacing:'0.12em',
+                textDecoration:'none',borderBottom:'1px solid #c8c0b0',paddingBottom:1,
+                fontFamily:'Segoe UI,Tahoma,sans-serif',
+              }}>⚙ لوحة الإدارة</a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Crosshair */}
+      {entered&&locked&&!isMobile&&(
+        <div style={{position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',
+          width:20,height:20,pointerEvents:'none',zIndex:50}}>
+          <div style={{position:'absolute',width:1,height:20,background:'rgba(255,252,245,0.55)',left:9.5,top:0}}/>
+          <div style={{position:'absolute',width:20,height:1,background:'rgba(255,252,245,0.55)',left:0,top:9.5}}/>
+          <div style={{position:'absolute',width:4,height:4,borderRadius:'50%',
+            background:'rgba(255,252,245,0.7)',left:8,top:8}}/>
+        </div>
+      )}
+      {entered&&isMobile&&(
+        <div style={{position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',
+          width:6,height:6,borderRadius:'50%',background:'rgba(255,252,245,0.6)',
+          pointerEvents:'none',zIndex:50}}/>
+      )}
+
+      {/* Photo info */}
+      {entered&&photoInfo&&(
+        <div style={{position:'fixed',bottom:isMobile?165:60,left:'50%',transform:'translateX(-50%)',
+          pointerEvents:'none',zIndex:50}}>
+          <div style={{
+            background:'rgba(18,15,10,0.78)',backdropFilter:'blur(10px)',
+            border:'1px solid rgba(200,185,160,0.2)',
+            padding:'12px 28px',color:'#f5f0e8',textAlign:'center',
+            fontFamily:'Georgia,serif',
+          }}>
+            <div style={{fontWeight:400,fontSize:'1rem',marginBottom:4,letterSpacing:'0.05em'}}>
+              {photoInfo.title}
+            </div>
+            <div style={{fontSize:'0.72rem',color:'#c0b090',letterSpacing:'0.18em',
+              fontFamily:'Segoe UI,Tahoma,sans-serif'}}>{photoInfo.sub}</div>
+          </div>
+        </div>
+      )}
+
+      {/* HUD */}
+      {entered&&!isMobile&&(
+        <div style={{position:'fixed',bottom:16,left:'50%',transform:'translateX(-50%)',
+          fontSize:'0.65rem',color:'rgba(255,250,240,0.3)',letterSpacing:'0.18em',
+          pointerEvents:'none',zIndex:50,fontFamily:'Segoe UI,Tahoma,sans-serif'}}>
+          {locked?'ESC للتوقف · Shift للركض':'انقر للتحكم بالكاميرا'}
+        </div>
+      )}
+
+      {/* Top buttons */}
+      {entered&&(
+        <div style={{position:'fixed',top:14,right:14,zIndex:50,display:'flex',gap:8}}>
+          <a href="/admin/login" target="_blank" style={{
+            background:'rgba(30,25,18,0.72)',border:'1px solid rgba(200,185,155,0.2)',
+            color:'#d8cfc0',padding:isMobile?'9px 14px':'7px 14px',borderRadius:2,
+            fontSize:'0.72rem',letterSpacing:'0.1em',textDecoration:'none',
+            backdropFilter:'blur(6px)',fontFamily:'Segoe UI,Tahoma,sans-serif',
+            WebkitTapHighlightColor:'transparent',
+          }}>⚙ إدارة</a>
+          <button onClick={()=>{document.exitPointerLock?.();setEntered(false);setLocked(false);}} style={{
+            background:'rgba(30,25,18,0.72)',border:'1px solid rgba(200,185,155,0.2)',
+            color:'#d8cfc0',padding:isMobile?'9px 14px':'7px 14px',cursor:'pointer',
+            fontSize:'0.72rem',letterSpacing:'0.1em',borderRadius:2,
+            backdropFilter:'blur(6px)',fontFamily:'Segoe UI,Tahoma,sans-serif',
+            WebkitTapHighlightColor:'transparent',
+          }}>← خروج</button>
+        </div>
+      )}
+
+      {/* Mobile Joystick */}
+      {entered&&isMobile&&(
+        <div style={{position:'fixed',bottom:0,left:0,right:0,height:155,zIndex:50,
+          display:'flex',alignItems:'center',justifyContent:'space-between',
+          padding:'0 28px 16px',pointerEvents:'none',
+          background:'linear-gradient(to top,rgba(20,16,10,0.35),transparent)',
+        }}>
+          <div style={{pointerEvents:'auto'}}>
+            <div ref={joystickZoneRef} style={{
+              width:115,height:115,borderRadius:'50%',
+              background:'rgba(255,250,240,0.12)',
+              border:'1.5px solid rgba(255,250,240,0.28)',
+              backdropFilter:'blur(4px)',position:'relative',
+              touchAction:'none',WebkitTapHighlightColor:'transparent',
+            }}>
+              <div style={{position:'absolute',width:1,height:'55%',background:'rgba(255,250,240,0.18)',left:'50%',top:'22.5%'}}/>
+              <div style={{position:'absolute',height:1,width:'55%',background:'rgba(255,250,240,0.18)',top:'50%',left:'22.5%'}}/>
+              <div ref={joystickKnobRef} style={{
+                position:'absolute',top:'50%',left:'50%',
+                transform:'translate(-50%,-50%)',
+                width:46,height:46,borderRadius:'50%',
+                background:'rgba(255,252,245,0.65)',
+                border:'1.5px solid rgba(200,185,155,0.5)',
+                boxShadow:'0 2px 14px rgba(0,0,0,0.22)',
+              }}/>
+            </div>
+            <div style={{textAlign:'center',marginTop:5,fontSize:'0.6rem',
+              color:'rgba(255,250,240,0.35)',letterSpacing:'0.1em',fontFamily:'Segoe UI,Tahoma,sans-serif'}}>
+              تحرك
+            </div>
+          </div>
+          <div style={{textAlign:'center',opacity:0.35}}>
+            <div style={{fontSize:'1.4rem',marginBottom:4}}>👁</div>
+            <div style={{fontSize:'0.6rem',color:'rgba(255,250,240,0.5)',letterSpacing:'0.1em',
+              fontFamily:'Segoe UI,Tahoma,sans-serif'}}>اسحب للنظر</div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
