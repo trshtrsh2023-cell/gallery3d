@@ -58,7 +58,7 @@ export default function Home() {
     function initGallery(activePhotos) {
       'use strict';
       const EYE_HEIGHT = 1.6;
-      const SHOW_DIST = 3.0; // مسافة أكبر قليلاً لضمان ظهور لوحة المعلومات عند الاقتراب
+      const SHOW_DIST = 3.5;
 
       const SLOTS = [
         { pos: [-4.6, EYE_HEIGHT, -10], rotY: Math.PI / 2 },
@@ -196,7 +196,7 @@ export default function Home() {
         });
       });
 
-      // --- التحكم بلوحة المفاتيح (WASD والأسهم) ---
+      // --- استماع لأزرار لوحة المفاتيح (حركة بطيئة وثابتة) ---
       window.addEventListener('keydown', (e) => {
         if (fullscreenOpen) return;
         if (e.code === 'KeyW' || e.code === 'ArrowUp') state.keys.w = true;
@@ -212,7 +212,7 @@ export default function Home() {
         if (e.code === 'KeyD' || e.code === 'ArrowRight') state.keys.d = false;
       });
 
-      // --- تحكم الماوس للنظر ---
+      // --- تحكم الماوس للنظر والتجول ---
       renderer.domElement.addEventListener('mousedown', (e) => {
         if (fullscreenOpen) return;
         state.mouseLook = true;
@@ -347,30 +347,39 @@ export default function Home() {
         camera.rotation.x = state.pitch;
 
         if (!fullscreenOpen) {
-          // سرعة حركة بطيئة ومريحة (0.03 بدلاً من السرعات السابقة العالية)
-          const speed = 0.035;
-          const v = new window.THREE.Vector3();
+          // سرعة حركة بطيئة وواقعية
+          const speed = 0.04;
+          const moveVector = new window.THREE.Vector3(0, 0, 0);
 
-          if (state.keys.w) v.z -= 1;
-          if (state.keys.s) v.z += 1;
-          if (state.keys.a) v.x -= 1;
-          if (state.keys.d) v.x += 1;
+          if (state.keys.w) moveVector.z -= 1;
+          if (state.keys.s) moveVector.z += 1;
+          if (state.keys.a) moveVector.x -= 1;
+          if (state.keys.d) moveVector.x += 1;
 
-          if (v.lengthSq() > 0) {
-            v.normalize();
-            v.applyAxisAngle(new window.THREE.Vector3(0, 1, 0), state.yaw);
-            camera.position.addScaledVector(v, speed);
+          if (moveVector.lengthSq() > 0) {
+            moveVector.normalize();
+            // تطبيق الاتجاه بناءً على زاوية الرؤية الأفقية (yaw) فقط لضمان حركة أفقية دقيقة ومستقرة
+            const camDir = new window.THREE.Vector3(Math.sin(state.yaw), 0, Math.cos(state.yaw));
+            const sideDir = new window.THREE.Vector3(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
+            
+            let displacement = new window.THREE.Vector3(0, 0, 0);
+            if (state.keys.w) displacement.addScaledVector(camDir, speed);
+            if (state.keys.s) displacement.addScaledVector(camDir, -speed);
+            if (state.keys.a) displacement.addScaledVector(sideDir, speed);
+            if (state.keys.d) displacement.addScaledVector(sideDir, -speed);
+
+            camera.position.add(displacement);
           }
 
-          // حركة الجوستستيك للجوال (بسرعة بطيئة متوازنة)
+          // حركة الجوستستيك للجوال
           if (state.joy.a) {
             const joyDir = new window.THREE.Vector3(state.joy.dx, 0, state.joy.dy).applyQuaternion(camera.quaternion);
             joyDir.y = 0;
             if (joyDir.lengthSq() > 0) joyDir.normalize();
-            camera.position.addScaledVector(joyDir, 0.04);
+            camera.position.addScaledVector(joyDir, 0.05);
           }
 
-          // حدود الغرفة الافتراضية
+          // حدود الغرفة لمنع الخروج عن الجدران
           camera.position.x = Math.max(-9, Math.min(9, camera.position.x));
           camera.position.z = Math.max(-14, Math.min(14, camera.position.z));
 
