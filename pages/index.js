@@ -277,21 +277,40 @@ export default function Home() {
         hitGroups.push(g);
 
         loader.load(ph.url, (t) => {
-          t.colorSpace = window.THREE.SRGBColorSpace;
-
           // نحافظ على أبعاد الصورة الأصلية (النسبة الحقيقية) دون أي قص أو
           // تمديد، مع تحديدها بسقف أقصى (MAX_FRAME_W × MAX_FRAME_H) فقط
           // لمنع تلامس اللوحات المتجاورة
-          const srcW = t.image?.width || 3;
-          const srcH = t.image?.height || 2;
+          const srcImg = t.image;
+          const srcW = srcImg?.width || 3;
+          const srcH = srcImg?.height || 2;
           const aspect = srcW / srcH;
 
           let newW = MAX_FRAME_W, newH = MAX_FRAME_W / aspect;
           if (newH > MAX_FRAME_H) { newH = MAX_FRAME_H; newW = MAX_FRAME_H * aspect; }
 
+          // عرض الصالة يستخدم نسخة مصغّرة من الصورة فقط (بنفس مستوى الجودة
+          // المعتمد قبل آخر تحديث) لتخفيف الحمل على موارد الجهاز مع ٢٥ لوحة
+          // في المشهد دفعة واحدة. الصورة الأصلية كاملة الجودة لا تُمس أبداً
+          // وتبقى محفوظة في رابطها (d.url) لتُستخدم عند النقر/فتح الصورة.
+          const GALLERY_DISPLAY_MAX_DIM = 768;
+          let displayMap = t;
+          if (srcImg && (srcW > GALLERY_DISPLAY_MAX_DIM || srcH > GALLERY_DISPLAY_MAX_DIM)) {
+            const scale = GALLERY_DISPLAY_MAX_DIM / Math.max(srcW, srcH);
+            const cw = Math.max(1, Math.round(srcW * scale));
+            const ch = Math.max(1, Math.round(srcH * scale));
+            const canvas = document.createElement('canvas');
+            canvas.width = cw; canvas.height = ch;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(srcImg, 0, 0, cw, ch);
+            displayMap = new window.THREE.CanvasTexture(canvas);
+            displayMap.needsUpdate = true;
+            t.dispose(); // تخلّص من النسخة كاملة الجودة من ذاكرة الـGPU بعد استخراج المصغّرة
+          }
+          displayMap.colorSpace = window.THREE.SRGBColorSpace;
+
           imgMesh.geometry.dispose();
           imgMesh.geometry = new window.THREE.PlaneGeometry(newW, newH);
-          imgMesh.material = new window.THREE.MeshBasicMaterial({ map: t });
+          imgMesh.material = new window.THREE.MeshBasicMaterial({ map: displayMap });
 
           frame.geometry.dispose();
           frame.geometry = new window.THREE.BoxGeometry(newW + MAT_PADDING, newH + MAT_PADDING, FRAME_DEPTH);
@@ -357,15 +376,21 @@ export default function Home() {
       function onTouchStart(e) {
         if (fullscreenOpen || paused) return;
         for (const t of e.changedTouches) {
-          // منطقة الجويستيك الفعلية فقط (الربع السفلي الأيسر من الشاشة، حيث
-          // تظهر دائرة التحكم)، وليس كل الجهة اليسرى من الشاشة — هذا هو
-          // الإصلاح لمشكلة تفعّل الجويستيك من منتصف الشاشة
-          const isNearJoystick = t.clientX < window.innerWidth * 0.5 && t.clientY > window.innerHeight * 0.55;
+          // نحدد منطقة تفعيل الجويستيك من موقعه الحقيقي على الشاشة (مع هامش
+          // بسيط حوله لسهولة اللمس) بدل نسبة ثابتة من أبعاد الشاشة — هذا
+          // يضمن أن منطقة اللمس تطابق دائماً مكان ظهور الجويستيك فعلياً
+          let isNearJoystick = false;
+          let r = null;
+          if (joyZone) {
+            r = joyZone.getBoundingClientRect();
+            const pad = 34;
+            isNearJoystick = t.clientX >= r.left - pad && t.clientX <= r.right + pad &&
+              t.clientY >= r.top - pad && t.clientY <= r.bottom + pad;
+          }
           if (isNearJoystick && !state.joy.a) {
             state.joy.a = true;
             state.joy.id = t.identifier;
-            if (joyZone) {
-              const r = joyZone.getBoundingClientRect();
+            if (r) {
               state.joy.cx = r.left + r.width / 2;
               state.joy.cy = r.top + r.height / 2;
             }
@@ -509,8 +534,8 @@ export default function Home() {
         camera.rotation.x = state.pitch;
 
         if (!fullscreenOpen && !paused) {
-          // سرعة حركة بطيئة وواقعية
-          const speed = 0.04;
+          // سرعة حركة الكمبيوتر (لوحة المفاتيح) — كانت بطيئة فزيدت لحركة أسرع وأريح
+          const speed = 0.11;
 
           // اتجاه الأمام الفعلي للكاميرا (yaw=0 يعني النظر نحو -Z في Three.js)
           const forward = new window.THREE.Vector3(-Math.sin(state.yaw), 0, -Math.cos(state.yaw));
@@ -824,14 +849,14 @@ export default function Home() {
             <line x1="16.62" y1="12" x2="10.88" y2="21.94" />
           </svg>
 
-          <h1 style={{ fontSize: '28px', letterSpacing: '.04em', fontWeight: 500, color: '#f3efe8', marginBottom: '4px', fontFamily: "'Georgia', 'Times New Roman', serif" }}>المعرض الفوتوغرافي الافتراضي</h1>
+          <h1 style={{ fontSize: '28px', letterSpacing: '.04em', fontWeight: 500, color: '#f3efe8', marginBottom: '4px', fontFamily: "'Georgia', 'Times New Roman', serif" }}>عدسة الطائف</h1>
           <div style={{ fontSize: '11px', letterSpacing: '.38em', color: '#8a7a56', marginBottom: '16px', fontFamily: "Georgia, serif" }}>TAIF&nbsp;PHOTOGRAPHY&nbsp;GALLERY</div>
 
           <p style={{ color: '#9a9388', fontSize: '13.5px', lineHeight: 1.9, marginBottom: '6px' }}>
-            تطوير : انور محمد بإشراف: عدنان الخمري — جمعية الثقافة والفنون بالطائف
+            معرض الفوتوغرافيا الافتراضي — جمعية الثقافة والفنون بالطائف
           </p>
-          <div style={{ color: '#ff0000', fontSize: '10.5px', letterSpacing: '.12em', marginBottom: '26px', fontFamily: 'monospace' }}>
-            الموقع تحت الإنشاء من قبل المطور
+          <div style={{ color: '#5f5848', fontSize: '10.5px', letterSpacing: '.12em', marginBottom: '26px', fontFamily: 'monospace' }}>
+            F/2.8 — 1/125s — ISO 100
           </div>
 
           <input
@@ -881,7 +906,7 @@ export default function Home() {
       </div>
 
       {/* أداة التحكم بالجوال (Joystick) */}
-      <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, display: 'none' }}>
+      <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, display: 'none', opacity: 0.3 }}>
         <div id="joyZone" style={{ width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(30, 25, 20, .42)', border: '1px solid rgba(255, 255, 255, .32)', position: 'relative', touchAction: 'none' }}>
           <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .95)', position: 'absolute', top: '31px', left: '31px', pointerEvents: 'none' }}></div>
         </div>
