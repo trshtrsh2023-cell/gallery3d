@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 
-const TOTAL_SLOTS = 11; // عدد مواقع اللوحات داخل الصالة (SLOTS في pages/index.js)
+const TOTAL_SLOTS = 25; // عدد مواقع اللوحات داخل الصالة (يجب أن يطابق SLOTS في pages/index.js)
 
 export default function AdminDashboard() {
   const router = useRouter();

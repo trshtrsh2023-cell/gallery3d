@@ -1,10 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import Head from 'next/head';
+
+const PRESENCE_HEARTBEAT_MS = 20000;
 
 export default function Home() {
   const [photos, setPhotos] = useState([]);
   const [visitorName, setVisitorName] = useState('');
   const [entering, setEntering] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [presenceOpen, setPresenceOpen] = useState(false);
+  const [presence, setPresence] = useState({ count: 0, names: [] });
+  const [creditsOpen, setCreditsOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const presenceTimerRef = useRef(null);
+  const sessionIdRef = useRef(null);
 
   useEffect(() => {
     fetch('/api/photos')
@@ -46,6 +55,22 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setIsMobile(('ontouchstart' in window) || navigator.maxTouchPoints > 0);
+    try {
+      let sid = sessionStorage.getItem('gallery_session_id');
+      if (!sid) {
+        sid = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        sessionStorage.setItem('gallery_session_id', sid);
+      }
+      sessionIdRef.current = sid;
+    } catch (e) {
+      sessionIdRef.current = Math.random().toString(36).slice(2);
+    }
+    return () => { if (presenceTimerRef.current) clearInterval(presenceTimerRef.current); };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined' || photos.length === 0) return;
 
     let disposed = false;
@@ -72,19 +97,50 @@ export default function Home() {
       const SHOW_DIST = 3.5;   // مسافة ظهور لوحة المعلومات الزجاجية
       const OPEN_DIST = 2.0;   // مسافة السماح بفتح الصورة بالتكبير (مترين)
 
+      // مواقع اللوحات: الإحداثيات هنا هي بالضبط سطح الجدار المجاور (لا فراغ)،
+      // واللوحة تُغرَس جزئياً داخل الجدار عبر الإزاحة الصغيرة لاحقاً بدل أن
+      // تطفو أمامه. ٢٥ موقعاً مرقّمة ١..٢٥ لتطابق قائمة "موقع اللوحة" بلوحة
+      // التحكم (TOTAL_SLOTS في pages/admin/dashboard.js يجب أن يبقى مطابقاً).
       const SLOTS = [
-        { pos: [-4.6, EYE_HEIGHT, -10], rotY: Math.PI / 2 },
-        { pos: [-4.6, EYE_HEIGHT, -5], rotY: Math.PI / 2 },
-        { pos: [-4.6, EYE_HEIGHT, 0], rotY: Math.PI / 2 },
-        { pos: [-4.6, EYE_HEIGHT, 5], rotY: Math.PI / 2 },
-        { pos: [4.6, EYE_HEIGHT, -10], rotY: -Math.PI / 2 },
-        { pos: [4.6, EYE_HEIGHT, -5], rotY: -Math.PI / 2 },
-        { pos: [4.6, EYE_HEIGHT, 0], rotY: -Math.PI / 2 },
-        { pos: [4.6, EYE_HEIGHT, 5], rotY: -Math.PI / 2 },
-        { pos: [-6, EYE_HEIGHT, -14.4], rotY: 0 },
-        { pos: [0, EYE_HEIGHT, -14.4], rotY: 0 },
-        { pos: [6, EYE_HEIGHT, -14.4], rotY: 0 }
+        // الجدار الداخلي الأيسر (x=-5 سطحه عند -4.75)
+        { pos: [-4.75, EYE_HEIGHT, -10], rotY: Math.PI / 2 },
+        { pos: [-4.75, EYE_HEIGHT, -5], rotY: Math.PI / 2 },
+        { pos: [-4.75, EYE_HEIGHT, 0], rotY: Math.PI / 2 },
+        { pos: [-4.75, EYE_HEIGHT, 5], rotY: Math.PI / 2 },
+        { pos: [-4.75, EYE_HEIGHT, 10], rotY: Math.PI / 2 },
+        // الجدار الداخلي الأيمن (x=5 سطحه عند 4.75)
+        { pos: [4.75, EYE_HEIGHT, -10], rotY: -Math.PI / 2 },
+        { pos: [4.75, EYE_HEIGHT, -5], rotY: -Math.PI / 2 },
+        { pos: [4.75, EYE_HEIGHT, 0], rotY: -Math.PI / 2 },
+        { pos: [4.75, EYE_HEIGHT, 5], rotY: -Math.PI / 2 },
+        { pos: [4.75, EYE_HEIGHT, 10], rotY: -Math.PI / 2 },
+        // الجدار الخارجي الأيسر (x=-10 سطحه عند -9.7)
+        { pos: [-9.7, EYE_HEIGHT, -10], rotY: Math.PI / 2 },
+        { pos: [-9.7, EYE_HEIGHT, -5], rotY: Math.PI / 2 },
+        { pos: [-9.7, EYE_HEIGHT, 0], rotY: Math.PI / 2 },
+        { pos: [-9.7, EYE_HEIGHT, 5], rotY: Math.PI / 2 },
+        { pos: [-9.7, EYE_HEIGHT, 10], rotY: Math.PI / 2 },
+        // الجدار الخارجي الأيمن (x=10 سطحه عند 9.7)
+        { pos: [9.7, EYE_HEIGHT, -10], rotY: -Math.PI / 2 },
+        { pos: [9.7, EYE_HEIGHT, -5], rotY: -Math.PI / 2 },
+        { pos: [9.7, EYE_HEIGHT, 0], rotY: -Math.PI / 2 },
+        { pos: [9.7, EYE_HEIGHT, 5], rotY: -Math.PI / 2 },
+        { pos: [9.7, EYE_HEIGHT, 10], rotY: -Math.PI / 2 },
+        // الجدار الخلفي (z=-15 سطحه عند -14.7)
+        { pos: [-8, EYE_HEIGHT, -14.7], rotY: 0 },
+        { pos: [-4, EYE_HEIGHT, -14.7], rotY: 0 },
+        { pos: [0, EYE_HEIGHT, -14.7], rotY: 0 },
+        { pos: [4, EYE_HEIGHT, -14.7], rotY: 0 },
+        { pos: [8, EYE_HEIGHT, -14.7], rotY: 0 }
       ];
+
+      // أبعاد أقصى للوحة (تحافظ على أبعاد الصورة الأصلية دون تمديد/قص،
+      // وتمنع تلامس اللوحات المتجاورة ببعضها)
+      const MAX_FRAME_W = 2.6;
+      const MAX_FRAME_H = 1.9;
+      const MAT_PADDING = 0.14;   // هامش الإطار حول الصورة
+      const FRAME_DEPTH = 0.07;   // سُمك الإطار (نصفه مغروس داخل الجدار)
+      const IMAGE_OFFSET = 0.045; // إزاحة الصورة أمام وجه الإطار مباشرة
 
       function createWoodTexture() {
         const canvas = document.createElement('canvas');
@@ -126,7 +182,7 @@ export default function Home() {
         tap: {}
       };
 
-      let scene, camera, renderer, hitGroups = [], fullscreenOpen = false, panelTarget = null, rafId = null;
+      let scene, camera, renderer, hitGroups = [], fullscreenOpen = false, panelTarget = null, rafId = null, paused = false;
 
       const host = document.getElementById('canvasHost');
       if (!host) return () => {};
@@ -174,7 +230,7 @@ export default function Home() {
       const loader = new window.THREE.TextureLoader();
 
       // توزيع اللوحات على المواقع: إن حدّد الأدمن "slot" (رقم موقع من ١ إلى
-      // ١١) تُعرض اللوحة في ذلك الموقع بالضبط، وإلا تُرتَّب تلقائياً بالترتيب
+      // ٢٥) تُعرض اللوحة في ذلك الموقع بالضبط، وإلا تُرتَّب تلقائياً بالترتيب
       const usedSlotIdx = new Set();
       activePhotos.forEach((ph) => { if (ph.slot) usedSlotIdx.add(ph.slot - 1); });
       let autoCursor = 0;
@@ -189,22 +245,27 @@ export default function Home() {
         const slot = SLOTS[slotIdx];
         if (!slot) return;
         const g = new window.THREE.Group();
+        // الموضع = سطح الجدار بالضبط (بدون أي فراغ)
         g.position.set(slot.pos[0], EYE_HEIGHT, slot.pos[2]);
         g.rotation.y = slot.rotY;
         g.userData = ph;
 
+        // حجم مبدئي مؤقت (نسبة 1.5) إلى حين تحميل الصورة الفعلية ومعرفة أبعادها
+        let w = 2.2, h = 1.47;
+
         const imgMesh = new window.THREE.Mesh(
-          new window.THREE.PlaneGeometry(2.4, 1.6),
+          new window.THREE.PlaneGeometry(w, h),
           new window.THREE.MeshBasicMaterial({ color: 0x222222 })
         );
-        imgMesh.position.z = 0.15;
+        imgMesh.position.z = IMAGE_OFFSET;
         g.add(imgMesh);
 
+        // الإطار يتمركز عند سطح الجدار بالضبط (z محلي = 0)، فنصفه داخل
+        // الجدار ونصفه بارز أمامه — لا يطفو بفراغ ولا يلتصق على الحافة فقط
         const frame = new window.THREE.Mesh(
-          new window.THREE.BoxGeometry(2.55, 1.75, 0.08),
+          new window.THREE.BoxGeometry(w + MAT_PADDING, h + MAT_PADDING, FRAME_DEPTH),
           new window.THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 })
         );
-        frame.position.z = 0.1;
         g.add(frame);
 
         const spot = new window.THREE.SpotLight(0xffeedd, 1.4, 6, Math.PI / 6, 0.5);
@@ -217,13 +278,29 @@ export default function Home() {
 
         loader.load(ph.url, (t) => {
           t.colorSpace = window.THREE.SRGBColorSpace;
+
+          // نحافظ على أبعاد الصورة الأصلية (النسبة الحقيقية) دون أي قص أو
+          // تمديد، مع تحديدها بسقف أقصى (MAX_FRAME_W × MAX_FRAME_H) فقط
+          // لمنع تلامس اللوحات المتجاورة
+          const srcW = t.image?.width || 3;
+          const srcH = t.image?.height || 2;
+          const aspect = srcW / srcH;
+
+          let newW = MAX_FRAME_W, newH = MAX_FRAME_W / aspect;
+          if (newH > MAX_FRAME_H) { newH = MAX_FRAME_H; newW = MAX_FRAME_H * aspect; }
+
+          imgMesh.geometry.dispose();
+          imgMesh.geometry = new window.THREE.PlaneGeometry(newW, newH);
           imgMesh.material = new window.THREE.MeshBasicMaterial({ map: t });
+
+          frame.geometry.dispose();
+          frame.geometry = new window.THREE.BoxGeometry(newW + MAT_PADDING, newH + MAT_PADDING, FRAME_DEPTH);
         });
       });
 
       // --- لوحة المفاتيح ---
       function onKeyDown(e) {
-        if (fullscreenOpen) return;
+        if (fullscreenOpen || paused) return;
         if (e.code === 'KeyW' || e.code === 'ArrowUp') state.keys.w = true;
         if (e.code === 'KeyS' || e.code === 'ArrowDown') state.keys.s = true;
         if (e.code === 'KeyA' || e.code === 'ArrowLeft') state.keys.a = true;
@@ -240,7 +317,7 @@ export default function Home() {
 
       // --- تحكم الماوس: سحب للنظر، ونقرة حقيقية (بدون سحب) لفتح الصورة ---
       function onMouseDown(e) {
-        if (fullscreenOpen) return;
+        if (fullscreenOpen || paused) return;
         state.mouseLook = true;
         state.lastMouseX = e.clientX;
         state.lastMouseY = e.clientY;
@@ -250,7 +327,7 @@ export default function Home() {
         state.mouse.downTime = Date.now();
       }
       function onMouseMove(e) {
-        if (!state.mouseLook || fullscreenOpen) return;
+        if (!state.mouseLook || fullscreenOpen || paused) return;
         const dx = e.clientX - state.lastMouseX;
         const dy = e.clientY - state.lastMouseY;
         if (Math.hypot(e.clientX - state.mouse.downX, e.clientY - state.mouse.downY) > 6) {
@@ -265,7 +342,7 @@ export default function Home() {
       function onMouseUp(e) {
         const wasLooking = state.mouseLook;
         state.mouseLook = false;
-        if (wasLooking && !fullscreenOpen && !state.mouse.moved && (Date.now() - state.mouse.downTime) < 500) {
+        if (wasLooking && !fullscreenOpen && !paused && !state.mouse.moved && (Date.now() - state.mouse.downTime) < 500) {
           triggerRaycast(e.clientX, e.clientY);
         }
       }
@@ -278,6 +355,7 @@ export default function Home() {
       const joyKnob = document.getElementById('joyKnob');
 
       function onTouchStart(e) {
+        if (fullscreenOpen || paused) return;
         for (const t of e.changedTouches) {
           // منطقة الجويستيك الفعلية فقط (الربع السفلي الأيسر من الشاشة، حيث
           // تظهر دائرة التحكم)، وليس كل الجهة اليسرى من الشاشة — هذا هو
@@ -411,13 +489,26 @@ export default function Home() {
       }
       window.addEventListener('resize', onResize);
 
+      // إيقاف/استئناف الحركة عند الخروج للشاشة الرئيسية من القائمة العلوية
+      // (الأزرار نفسها معرّفة في React خارج هذا النطاق، فنتواصل معها عبر
+      // حدث على window بدل الوصول المباشر لمتغيرات هذا النطاق المغلق)
+      function onGalleryPause() {
+        paused = true;
+        state.keys.w = state.keys.s = state.keys.a = state.keys.d = false;
+        state.joy.a = false; state.joy.dx = 0; state.joy.dy = 0;
+        state.mouseLook = false;
+      }
+      function onGalleryResume() { paused = false; }
+      window.addEventListener('gallery:pause', onGalleryPause);
+      window.addEventListener('gallery:resume', onGalleryResume);
+
       function animate() {
         rafId = requestAnimationFrame(animate);
         if (!camera) return;
         camera.rotation.y = state.yaw;
         camera.rotation.x = state.pitch;
 
-        if (!fullscreenOpen) {
+        if (!fullscreenOpen && !paused) {
           // سرعة حركة بطيئة وواقعية
           const speed = 0.04;
 
@@ -486,6 +577,8 @@ export default function Home() {
         window.removeEventListener('mouseup', onMouseUp);
         window.removeEventListener('resize', onResize);
         window.removeEventListener('keydown', onKeyDownEsc);
+        window.removeEventListener('gallery:pause', onGalleryPause);
+        window.removeEventListener('gallery:resume', onGalleryResume);
         if (renderer) {
           renderer.domElement.removeEventListener('mousedown', onMouseDown);
           renderer.domElement.removeEventListener('touchstart', onTouchStart);
@@ -499,6 +592,26 @@ export default function Home() {
       };
     }
   }, [photos]);
+
+  function startPresenceHeartbeat(name) {
+    if (presenceTimerRef.current) clearInterval(presenceTimerRef.current);
+    const sendBeat = () => {
+      fetch('/api/presence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionIdRef.current, visitor_name: name })
+      }).catch(() => {});
+    };
+    sendBeat();
+    presenceTimerRef.current = setInterval(sendBeat, PRESENCE_HEARTBEAT_MS);
+  }
+
+  function stopPresenceHeartbeat() {
+    if (presenceTimerRef.current) {
+      clearInterval(presenceTimerRef.current);
+      presenceTimerRef.current = null;
+    }
+  }
 
   async function handleEnter() {
     const name = visitorName.trim();
@@ -520,9 +633,35 @@ export default function Home() {
     const joyWrap = document.getElementById('joyWrap');
     const lookHint = document.getElementById('lookHintMobile');
     if (entry) entry.style.display = 'none';
-    if (joyWrap) joyWrap.style.display = 'block';
-    if (lookHint) lookHint.style.display = 'block';
+    // الجويستيك يظهر فقط لمستخدمي شاشات اللمس (جوال/آيباد)، وليس لمستخدمي الكمبيوتر
+    if (isMobile) {
+      if (joyWrap) joyWrap.style.display = 'block';
+      if (lookHint) lookHint.style.display = 'block';
+    }
+    window.dispatchEvent(new Event('gallery:resume'));
+    startPresenceHeartbeat(name);
     setEntering(false);
+  }
+
+  function handleExitToHome() {
+    setMenuOpen(false);
+    const entry = document.getElementById('entryOverlay');
+    const joyWrap = document.getElementById('joyWrap');
+    const lookHint = document.getElementById('lookHintMobile');
+    if (entry) entry.style.display = 'flex';
+    if (joyWrap) joyWrap.style.display = 'none';
+    if (lookHint) lookHint.style.display = 'none';
+    window.dispatchEvent(new Event('gallery:pause'));
+    stopPresenceHeartbeat();
+  }
+
+  function handleOpenPresence() {
+    setPresenceOpen((v) => !v);
+    setMenuOpen(false);
+    fetch('/api/presence')
+      .then((r) => r.json())
+      .then((d) => setPresence({ count: d.count || 0, names: Array.isArray(d.names) ? d.names : [] }))
+      .catch(() => setPresence({ count: 0, names: [] }));
   }
 
   const handleToggleGlass = (e) => {
@@ -555,12 +694,12 @@ export default function Home() {
         }
         #fsOverlay {
           opacity: 0; visibility: hidden; pointer-events: none;
-          transition: opacity .5s ease, visibility .5s, -webkit-backdrop-filter .5s ease, backdrop-filter .5s ease;
+          transition: opacity 1.1s ease, visibility 1.1s, -webkit-backdrop-filter 1.1s ease, backdrop-filter 1.1s ease;
         }
         #fsOverlay.open { opacity: 1; visibility: visible; pointer-events: auto; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
-        #fsImg { transform: scale(.6); filter: blur(30px); transition: transform .70s cubic-bezier(.19,1,.22,1), filter .55s ease; }
+        #fsImg { transform: scale(.8); filter: blur(22px); transition: transform 1.3s cubic-bezier(.19,1,.22,1), filter 1.3s ease; }
         #fsOverlay.open #fsImg { transform: scale(1); filter: blur(0); }
-        #fsCaption { opacity: 0; transform: translateY(10px); transition: opacity .5s ease .1s, transform .5s ease .1s; }
+        #fsCaption { opacity: 0; transform: translateY(10px); transition: opacity 1.1s ease .25s, transform 1.1s ease .25s; }
         #fsOverlay.open #fsCaption { opacity: 1; transform: translateY(0); }
         #fsBackBtn:active { filter: brightness(1.15); }
 
@@ -576,25 +715,92 @@ export default function Home() {
         #entryNameInput:focus { border-color: rgba(201,163,91,.65); }
         #entryNameInput::placeholder { color: #776f62; }
 
-        #adminCornerLink {
-          position: fixed; top: 16px; left: 16px; z-index: 1100; display: flex; align-items: center; gap: 6px;
-          color: rgba(243,239,232,.5); font-size: 11.5px; text-decoration: none; letter-spacing: .02em;
-          padding: 7px 12px 7px 9px; border-radius: 20px; border: 1px solid rgba(255,255,255,.08);
-          transition: color .2s ease, background .2s ease, border-color .2s ease;
+        #menuToggleBtn {
+          position: fixed; top: 16px; right: 16px; z-index: 1100; width: 38px; height: 38px; border-radius: 50%;
+          background: rgba(20,17,13,.5); border: 1px solid rgba(255,255,255,.12); color: rgba(243,239,232,.8);
+          display: flex; align-items: center; justify-content: center; cursor: pointer;
+          transition: background .2s ease, border-color .2s ease;
         }
-        #adminCornerLink:hover { color: #c9a35b; background: rgba(255,255,255,.05); border-color: rgba(201,163,91,.3); }
+        #menuToggleBtn:hover { background: rgba(255,255,255,.08); border-color: rgba(201,163,91,.35); }
+
+        #menuDropdown {
+          position: fixed; top: 60px; right: 16px; z-index: 1100; width: 236px;
+          background: rgba(15,12,10,.92); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+          border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 6px; color: #f3efe8;
+          opacity: 0; transform: translateY(-8px) scale(.97); pointer-events: none;
+          transition: opacity .2s ease, transform .2s ease;
+        }
+        #menuDropdown.open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+        .menu-item {
+          display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 8px;
+          background: none; border: none; color: #e9e3d8; font-size: 13px; text-align: right; text-decoration: none;
+          cursor: pointer; transition: background .15s ease;
+        }
+        .menu-item:hover { background: rgba(255,255,255,.06); }
+        .menu-item svg { flex-shrink: 0; color: #c9a35b; }
+        .menu-sep { height: 1px; background: rgba(255,255,255,.08); margin: 5px 4px; }
+        .menu-static { padding: 8px 12px; font-size: 11px; color: #7d7568; line-height: 1.7; }
+
+        #presencePanel, #creditsPanel {
+          position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(.95); z-index: 1300;
+          width: min(88vw, 320px); background: rgba(15,12,10,.96); backdrop-filter: blur(16px);
+          border: 1px solid rgba(201,163,91,.3); border-radius: 14px; padding: 22px; color: #f3efe8;
+          opacity: 0; pointer-events: none; transition: opacity .25s ease, transform .25s ease; text-align: center;
+        }
+        #presencePanel.open, #creditsPanel.open { opacity: 1; transform: translate(-50%, -50%) scale(1); pointer-events: auto; }
+        .panel-close {
+          margin-top: 16px; padding: 9px 20px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
+          color: #f3efe8; border-radius: 20px; cursor: pointer; font-size: 12.5px;
+        }
 
         .entry-aperture { animation: aperture-spin 26s linear infinite; }
         @keyframes aperture-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
 
-      <a id="adminCornerLink" href="/admin/login">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="11" width="18" height="11" rx="2" />
-          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      <button id="menuToggleBtn" onClick={() => setMenuOpen((v) => !v)} aria-label="القائمة">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
         </svg>
-        دخول الأدارة للمعرض
-      </a>
+      </button>
+
+      <div id="menuDropdown" className={menuOpen ? 'open' : ''}>
+        <button className="menu-item" onClick={handleOpenPresence}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+          الزوار المتواجدون حالياً
+        </button>
+        <button className="menu-item" onClick={handleExitToHome}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
+          العودة للصفحة الرئيسية
+        </button>
+        <button className="menu-item" onClick={() => { setCreditsOpen(true); setMenuOpen(false); }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
+          صُنع بواسطة
+        </button>
+        <div className="menu-sep"></div>
+        <a className="menu-item" href="/admin/login">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+          دخول الأدارة للمعرض
+        </a>
+      </div>
+
+      <div id="presencePanel" className={presenceOpen ? 'open' : ''}>
+        <h3 style={{ color: '#c9a35b', fontSize: '16px', marginBottom: '10px' }}>الزوار المتواجدون الآن</h3>
+        <div style={{ fontSize: '34px', fontWeight: 700, color: '#f3efe8', marginBottom: '8px' }}>{presence.count}</div>
+        <div style={{ fontSize: '12px', color: '#9a9388', maxHeight: '140px', overflowY: 'auto', lineHeight: 2 }}>
+          {presence.names.length > 0 ? presence.names.join('، ') : 'لا يوجد زوار آخرون الآن'}
+        </div>
+        <button className="panel-close" onClick={() => setPresenceOpen(false)}>إغلاق</button>
+      </div>
+
+      <div id="creditsPanel" className={creditsOpen ? 'open' : ''}>
+        <h3 style={{ color: '#c9a35b', fontSize: '16px', marginBottom: '12px' }}>صُنع بواسطة</h3>
+        <div style={{ fontSize: '13px', color: '#e9e3d8', lineHeight: 2.1 }}>
+          إعداد وإخراج: <b>أنور محمد</b><br />
+          إشراف قسم التصوير الضوئي: <b>عدنان الخمري</b><br />
+          إدارة جمعية الثقافة والفنون بالطائف: <b>فيصل الخديدي</b>
+        </div>
+        <button className="panel-close" onClick={() => setCreditsOpen(false)}>إغلاق</button>
+      </div>
 
       <div id="canvasHost" style={{ position: 'fixed', inset: 0, touchAction: 'none' }}></div>
 
@@ -624,13 +830,13 @@ export default function Home() {
           <p style={{ color: '#9a9388', fontSize: '13.5px', lineHeight: 1.9, marginBottom: '6px' }}>
             تطوير : انور محمد بإشراف: عدنان الخمري — جمعية الثقافة والفنون بالطائف
           </p>
-          <div style={{ color: '#ff0000', fontSize: '23.5px', letterSpacing: '.12em', marginBottom: '26px', fontFamily: 'monospace' }}>
+          <div style={{ color: '#ff0000', fontSize: '10.5px', letterSpacing: '.12em', marginBottom: '26px', fontFamily: 'monospace' }}>
             الموقع تحت الإنشاء من قبل المطور
           </div>
 
           <input
             id="entryNameInput"
-            placeholder="يرجى كتابة اسمك هنا ..."
+            placeholder="اكتب اسمك هنا..."
             value={visitorName}
             onChange={(e) => setVisitorName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleEnter()}
@@ -676,13 +882,13 @@ export default function Home() {
 
       {/* أداة التحكم بالجوال (Joystick) */}
       <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, display: 'none' }}>
-        <div id="joyZone" style={{ width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(255, 255, 255, .08)', border: '1px solid rgba(255, 255, 255, .18)', position: 'relative', touchAction: 'none' }}>
-          <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .8)', position: 'absolute', top: '31px', left: '31px', pointerEvents: 'none' }}></div>
+        <div id="joyZone" style={{ width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(30, 25, 20, .42)', border: '1px solid rgba(255, 255, 255, .32)', position: 'relative', touchAction: 'none' }}>
+          <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .95)', position: 'absolute', top: '31px', left: '31px', pointerEvents: 'none' }}></div>
         </div>
       </div>
 
       <div id="lookHintMobile" style={{ position: 'fixed', right: '20px', bottom: '26px', zIndex: 300, display: 'none', color: 'rgba(255, 255, 255, .7)', fontSize: '12px', background: 'rgba(0, 0, 0, .5)', padding: '8px 12px', borderRadius: '8px', pointerEvents: 'none' }}>
-        استخدم WASD أو الأسهم للتجول • اسحب بالماوس للنظر • انقر اللوحة للتكبير
+        عصا التحكم يسار الشاشة للحركة • اسحب الشاشة للنظر • انقر اللوحة للتكبير
       </div>
     </>
   );
