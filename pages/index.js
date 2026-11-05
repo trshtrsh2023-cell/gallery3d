@@ -618,19 +618,19 @@ export default function Home() {
             <line x1="16.62" y1="12" x2="10.88" y2="21.94" />
           </svg>
 
-          <h1 style={{ fontSize: '28px', letterSpacing: '.04em', fontWeight: 500, color: '#f3efe8', marginBottom: '4px', fontFamily: "'Georgia', 'Times New Roman', serif" }}>عدسة الطائف</h1>
+          <h1 style={{ fontSize: '28px', letterSpacing: '.04em', fontWeight: 500, color: '#f3efe8', marginBottom: '4px', fontFamily: "'Georgia', 'Times New Roman', serif" }}>المعرض الفوتوغرافي الافتراضي</h1>
           <div style={{ fontSize: '11px', letterSpacing: '.38em', color: '#8a7a56', marginBottom: '16px', fontFamily: "Georgia, serif" }}>TAIF&nbsp;PHOTOGRAPHY&nbsp;GALLERY</div>
 
           <p style={{ color: '#9a9388', fontSize: '13.5px', lineHeight: 1.9, marginBottom: '6px' }}>
-            معرض الفوتوغرافيا الافتراضي — جمعية الثقافة والفنون بالطائف
+            تطوير : انور محمد بإشراف: عدنان الخمري — جمعية الثقافة والفنون بالطائف
           </p>
-          <div style={{ color: '#5f5848', fontSize: '10.5px', letterSpacing: '.12em', marginBottom: '26px', fontFamily: 'monospace' }}>
-            F/2.8 — 1/125s — ISO 100
+          <div style={{ color: '#ff0000', fontSize: '23.5px', letterSpacing: '.12em', marginBottom: '26px', fontFamily: 'monospace' }}>
+            الموقع تحت الإنشاء من قبل المطور
           </div>
 
           <input
             id="entryNameInput"
-            placeholder="اكتب اسمك هنا..."
+            placeholder="يرجى كتابة اسمك هنا ..."
             value={visitorName}
             onChange={(e) => setVisitorName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleEnter()}
