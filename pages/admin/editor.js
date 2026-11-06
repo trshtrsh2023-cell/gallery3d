@@ -6,19 +6,12 @@ import {
   normalizeFrames, assignPhotosToFrames, prepareDisplayTexture, fitImage, makeEmptyFrameTexture
 } from '../../lib/galleryLayout';
 
-// ============================================================================
-// محرر صالة المعرض للإداريين — وضع الطيران الحر + تحريك/تدوير/تحجيم الإطارات والجدران
-// ============================================================================
-
 let uidCounter = 1;
 const newUid = (prefix = 'f') => prefix + (uidCounter++);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const RAD2DEG = 180 / Math.PI;
 
-// ---------------------------------------------------------------------------
-// محرّك ثلاثي الأبعاد (Three.js) — يعمل خارج React ويتواصل معه عبر cb
-// ---------------------------------------------------------------------------
 function createEngine(THREE, host, cb) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x14110e);
@@ -84,7 +77,6 @@ function createEngine(THREE, host, cb) {
     });
   }
 
-  // ---- خامات الصور ----
   const loader = new THREE.TextureLoader();
   const texCache = new Map();
   function loadPhoto(url, done) {
@@ -99,7 +91,6 @@ function createEngine(THREE, host, cb) {
     }, undefined, () => { e.failed = true; e.waiters.length = 0; });
   }
 
-  // ---- عقد الإطارات ----
   const nodes = new Map();
   const D = FRAME_STYLE;
 
@@ -215,7 +206,6 @@ function createEngine(THREE, host, cb) {
     });
   }
 
-  // ---- اختيار/سحب ----
   const ray = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   function castFromEvent(ev) {
@@ -253,7 +243,7 @@ function createEngine(THREE, host, cb) {
   }
 
   let looking = false;
-  let dragging = null; // { type: 'frame'|'wall', uid, ... }
+  let dragging = null;
   let lastX = 0;
   let lastY = 0;
   const keys = new Set();
@@ -308,7 +298,6 @@ function createEngine(THREE, host, cb) {
         }
         cb.moveFrame(dragging.uid, { x: r3(x), y: r3(clamp(y, FRAME_LIMITS.Y_MIN, FRAME_LIMITS.Y_MAX)), z: r3(z), r: r3(p.r) });
       } else if (dragging.type === 'wall') {
-        // سحب ونقل الجدار أفقياً عبر تقاطع شعاعي مع مستوى أفق الصالة
         const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
         const targetPos = new THREE.Vector3();
         castFromEvent(e).ray.intersectPlane(plane, targetPos);
@@ -458,9 +447,6 @@ function createEngine(THREE, host, cb) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// حقل رقمي بمسودة نصية
-// ---------------------------------------------------------------------------
 function NumField({ label, value, onChange, step = 0.05, digits = 2, suffix }) {
   const fmt = (v) => String(Math.round(v * 10 ** digits) / 10 ** digits);
   const [txt, setTxt] = useState(fmt(value));
@@ -492,9 +478,6 @@ function NumField({ label, value, onChange, step = 0.05, digits = 2, suffix }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// الصفحة الرئيسية للمحرر
-// ---------------------------------------------------------------------------
 export default function GalleryEditor() {
   const router = useRouter();
   const hostRef = useRef(null);
@@ -507,8 +490,8 @@ export default function GalleryEditor() {
   const [walls, setWalls] = useState([]);
   const [photos, setPhotos] = useState([]);
   const [photoOf, setPhotoOf] = useState({});
-  const [sel, setSel] = useState(null);       // uid الإطار المحدد
-  const [selWall, setSelWall] = useState(null); // uid الجدار المحدد
+  const [sel, setSel] = useState(null);
+  const [selWall, setSelWall] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
@@ -539,7 +522,6 @@ export default function GalleryEditor() {
     showToast._t = setTimeout(() => setToast(null), 3200);
   }, []);
 
-  // ---- تحميل البيانات ----
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -554,7 +536,6 @@ export default function GalleryEditor() {
       const baseFrames = normalizeFrames(lay && lay.frames);
       const listFrames = (baseFrames.length ? baseFrames : DEFAULT_FRAMES).map((f) => ({ ...f, uid: newUid('f') }));
       
-      // تهيئة الجدران من التخطيط المحفوظ أو الافتراضية ROOM_WALLS[cite: 1]
       const baseWalls = (lay && lay.walls) ? lay.walls : ROOM_WALLS.map((w, i) => ({
         uid: 'w' + (i + 1),
         width: w[0], height: w[1], depth: w[2],
@@ -578,7 +559,6 @@ export default function GalleryEditor() {
     return () => { cancelled = true; };
   }, [router]);
 
-  // ---- تحميل Three.js ----
   useEffect(() => {
     if (window.THREE) { setThreeReady(true); return; }
     const s = document.createElement('script');
@@ -588,7 +568,6 @@ export default function GalleryEditor() {
     document.body.appendChild(s);
   }, []);
 
-  // ---- إنشاء المحرك ----
   useEffect(() => {
     if (!threeReady || loading || !hostRef.current) return undefined;
     const eng = createEngine(window.THREE, hostRef.current, {
@@ -605,7 +584,6 @@ export default function GalleryEditor() {
     return () => { eng.dispose(); engineRef.current = null; setEngineReady(false); };
   }, [threeReady, loading]);
 
-  // ---- مزامنة الحالة مع المشهد ----
   useEffect(() => {
     if (!engineReady || !engineRef.current) return;
     engineRef.current.sync(
@@ -624,7 +602,6 @@ export default function GalleryEditor() {
   }, []);
   live.current.dirty = dirty;
 
-  // ---- التراجع / الإعادة ----
   const snapshot = () => JSON.stringify({ frames: live.current.frames, walls: live.current.walls, photoOf: live.current.photoOf });
   const pushUndo = useCallback((key) => {
     const now = Date.now();
@@ -657,7 +634,6 @@ export default function GalleryEditor() {
     applySnapshot(s);
   };
 
-  // ---- عمليات الإطارات والجدران ----
   const updateFrame = (uid, patch, key) => {
     pushUndo(key || ('u:' + uid + ':' + Object.keys(patch).join(',')));
     setFrames((fs) => fs.map((f) => (f.uid === uid ? { ...f, ...patch } : f)));
@@ -773,7 +749,6 @@ export default function GalleryEditor() {
     return null;
   })();
 
-  // ---- الحفظ ----
   const save = async () => {
     if (saving) return;
     if (!frames.length) { showToast('لا يمكن حفظ تخطيط بلا إطارات', 'err'); return; }
@@ -824,14 +799,12 @@ export default function GalleryEditor() {
     setDirty(true);
   };
 
-  // ---- ربط ردود المحرك ----
   cbRef.current = {
     beginGesture: () => pushUndo(),
     moveFrame: (uid, p) => { setFrames((fs) => fs.map((f) => (f.uid === uid ? { ...f, ...p } : f))); setDirty(true); },
     moveWall: (uid, p) => { setWalls((ws) => ws.map((w) => (w.uid === uid ? { ...w, ...p } : w))); setDirty(true); }
   };
 
-  // ---- اختصارات لوحة المفاتيح ----
   useEffect(() => {
     const onKey = (e) => {
       const typing = e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
@@ -906,7 +879,6 @@ export default function GalleryEditor() {
         )}
         {isDefault && <div className="note">التخطيط الحالي افتراضي ولم يُحفظ بعد في قاعدة البيانات.</div>}
 
-        {/* قسم الجدران */}
         <section>
           <h3>الجدران <small>(اضغط لتعديل الجدار)</small></h3>
           <div className="chips">
@@ -919,7 +891,6 @@ export default function GalleryEditor() {
           <button className="btn wide" style={{ marginTop: '10px' }} onClick={addWall}>+ إضافة جدار جديد</button>
         </section>
 
-        {/* قسم الإطارات */}
         <section>
           <h3>الإطارات <small>(اضغط للانتقال)</small></h3>
           <div className="chips">
@@ -937,7 +908,6 @@ export default function GalleryEditor() {
           <button className="btn wide" onClick={addAtCamera}>+ إطار جديد حيث أنظر</button>
         </section>
 
-        {/* لوحة تعديل الجدار المحدد */}
         {selWallObj ? (
           <section className="sel">
             <h3>الجدار المحدد <span className="selnum">جدار</span></h3>
@@ -966,7 +936,6 @@ export default function GalleryEditor() {
           </section>
         ) : null}
 
-        {/* لوحة تعديل الإطار المحدد */}
         {selFrame ? (
           <section className="sel">
             <h3>الإطار المحدد <span className="selnum">{selFrame.n}</span></h3>
@@ -1128,7 +1097,7 @@ const CSS = `
   .help h4 { margin:0 0 8px; font-size:13px; color:var(--gold2); }
   .help ul { margin:0; padding:0 16px 0 0; font-size:12px; line-height:1.95; color:#d8cdb8; }
   .help .x { position:absolute; top:6px; left:10px; background:none; border:none; color:var(--mut); font-size:20px; cursor:pointer; }
-
+  .helpBtn { position:absolute; bottom:12px; left:12px; background:rgba(0,0,0,.55); border:1px solid var(--line); color:#d8cdb8; border-radius:8px; padding:7px 12px; font-size:12px; cursor:pointer; }
   kbd { background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.2); border-radius:4px; padding:0 6px; font-family:inherit; font-size:11px; }
   .toast { position:absolute; top:64px; left:50%; transform:translateX(-50%); background:#1f3d27; border:1px solid #3d7a4d; color:#d6f2dc; padding:10px 18px; border-radius:10px; font-size:13px; box-shadow:0 8px 24px rgba(0,0,0,.4); }
   .toast.err { background:#451f1f; border-color:#8a3d3d; color:#f6d6d6; }

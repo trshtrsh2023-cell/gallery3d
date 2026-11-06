@@ -2,14 +2,10 @@ import { getSupabaseAdmin } from '../../lib/supabaseAdmin';
 import { getAdminFromReq } from '../../lib/auth';
 import { DEFAULT_FRAMES, ROOM_WALLS, normalizeFrames } from '../../lib/galleryLayout';
 
-// GET عام: تخطيط إطارات وجدران الصالة. عند غياب الجدول أو
-// الصف يُرجع التخطيط الافتراضي فلا ينكسر المعرض أبداً.
-// PUT للأدمن فقط: يحفظ التخطيط والجدران + ربط الصور بالإطارات (photoSlots).
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   const supabase = getSupabaseAdmin();
 
-  // تحويل الجدران الافتراضية ROOM_WALLS إلى الشكل الكائني المتوافق مع المحرر
   const defaultWalls = ROOM_WALLS.map((w, i) => ({
     uid: 'w' + (i + 1),
     width: w[0],
@@ -73,7 +69,6 @@ export default async function handler(req, res) {
         });
       }
 
-      // ربط الصور بالإطارات: { "<photo_id>": رقم_الإطار | null }
       let photosUpdated = 0;
       if (photoSlots && typeof photoSlots === 'object') {
         const valid = new Set(frames.map((f) => f.n));
