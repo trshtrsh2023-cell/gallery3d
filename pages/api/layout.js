@@ -1,23 +1,38 @@
 import { getSupabaseAdmin } from '../../lib/supabaseAdmin';
 import { getAdminFromReq } from '../../lib/auth';
-import { DEFAULT_FRAMES, normalizeFrames } from '../../lib/galleryLayout';
+import { DEFAULT_FRAMES, ROOM_WALLS, normalizeFrames } from '../../lib/galleryLayout';
 
-// GET عام: تخطيط إطارات الصالة (يستخدمه المعرض والمحرر). عند غياب الجدول أو
-// الصف يُرجع التخطيط الافتراضي (٢٥ إطاراً) فلا ينكسر المعرض أبداً.
-// PUT للأدمن فقط: يحفظ التخطيط + ربط الصور بالإطارات (photoSlots).
+// GET عام: تخطيط إطارات وجدران الصالة. عند غياب الجدول أو
+// الصف يُرجع التخطيط الافتراضي فلا ينكسر المعرض أبداً.
+// PUT للأدمن فقط: يحفظ التخطيط والجدران + ربط الصور بالإطارات (photoSlots).
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   const supabase = getSupabaseAdmin();
 
+  // تحويل الجدران الافتراضية ROOM_WALLS إلى الشكل الكائني المتوافق مع المحرر
+  const defaultWalls = ROOM_WALLS.map((w, i) => ({
+    uid: 'w' + (i + 1),
+    width: w[0],
+    height: w[1],
+    depth: w[2],
+    x: w[3],
+    y: w[4],
+    z: w[5],
+    r: w[6] || 0
+  }));
+
   if (req.method === 'GET') {
-    const fallback = { frames: DEFAULT_FRAMES, isDefault: true, updated_at: null };
+    const fallback = { frames: DEFAULT_FRAMES, walls: defaultWalls, isDefault: true, updated_at: null };
     if (!supabase) return res.status(200).json(fallback);
     try {
-      const { data, error } = await supabase.from('gallery_layout').select('frames, updated_at').eq('id', 1).maybeSingle();
+      const { data, error } = await supabase.from('gallery_layout').select('frames, walls, updated_at').eq('id', 1).maybeSingle();
       if (error || !data) return res.status(200).json(fallback);
+      
       const frames = normalizeFrames(data.frames);
+      const walls = Array.isArray(data.walls) && data.walls.length > 0 ? data.walls : defaultWalls;
+      
       if (!frames.length) return res.status(200).json(fallback);
-      return res.status(200).json({ frames, isDefault: false, updated_at: data.updated_at });
+      return res.status(200).json({ frames, walls, isDefault: false, updated_at: data.updated_at });
     } catch (e) {
       console.error('layout GET crashed:', e);
       return res.status(200).json(fallback);
@@ -30,7 +45,7 @@ export default async function handler(req, res) {
     if (!supabase) return res.status(500).json({ error: 'الخادم غير مهيأ — تحقق من متغيرات بيئة Supabase' });
 
     try {
-      const { frames: rawFrames, photoSlots } = req.body || {};
+      const { frames: rawFrames, walls: rawWalls, photoSlots } = req.body || {};
       if (!Array.isArray(rawFrames) || rawFrames.length === 0) {
         return res.status(400).json({ error: 'لا يمكن حفظ تخطيط بلا إطارات' });
       }
@@ -39,13 +54,22 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'يوجد إطار برقم مكرر أو بيانات غير صالحة — راجع أرقام الإطارات' });
       }
 
+      const walls = Array.isArray(rawWalls) ? rawWalls : defaultWalls;
+
       const { error } = await supabase
         .from('gallery_layout')
-        .upsert([{ id: 1, frames, updated_at: new Date().toISOString(), updated_by: admin.username || null }], { onConflict: 'id' });
+        .upsert([{ 
+          id: 1, 
+          frames, 
+          walls, 
+          updated_at: new Date().toISOString(), 
+          updated_by: admin.username || null 
+        }], { onConflict: 'id' });
+        
       if (error) {
         const missing = /gallery_layout/.test(error.message) && /(does not exist|schema cache|relation)/i.test(error.message);
         return res.status(500).json({
-          error: missing ? 'جدول gallery_layout غير موجود — نفّذ supabase_update_v10.3.sql في Supabase أولاً' : error.message
+          error: missing ? 'جدول gallery_layout غير موجود — نفّذ ملف الـ SQL المحدث في Supabase أولاً' : error.message
         });
       }
 
@@ -65,10 +89,10 @@ export default async function handler(req, res) {
         }
       }
 
-      return res.status(200).json({ ok: true, frames: frames.length, photosUpdated });
+      return res.status(200).json({ ok: true, frames: frames.length, walls: walls.length, photosUpdated });
     } catch (e) {
       console.error('layout PUT crashed:', e);
-      return res.status(500).json({ error: 'تعذّر حفظ التخطيط' });
+      return res.status(500).json({ error: 'تعذّر حفظ التخطيط والجدران' });
     }
   }
 
