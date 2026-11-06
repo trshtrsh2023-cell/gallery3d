@@ -1,10 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
 import Head from 'next/head';
+import { DEFAULT_FRAMES, FRAME_STYLE, ROOM_WALLS, normalizeFrames, assignPhotosToFrames, prepareDisplayTexture, fitImage, makeEmptyFrameTexture } from '../lib/galleryLayout';
 
 const PRESENCE_HEARTBEAT_MS = 20000;
 
 export default function Home() {
-  const [photos, setPhotos] = useState([]);
+  const [photos, setPhotos] = useState(null);   // null = لم تُحمَّل بعد (مصفوفة فارغة = لا صور بعد، فتظهر كل الإطارات فارغة)
+  const [layout, setLayout] = useState(null);   // تخطيط الإطارات من /api/layout (null = لم يُحمَّل بعد)
   const [visitorName, setVisitorName] = useState('');
   const [entering, setEntering] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -22,7 +24,7 @@ export default function Home() {
         return res.json();
       })
       .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           const formattedPhotos = data.map((p) => ({
             title: p.title || 'لوحة فنية',
             url: p.image_url || p.url,
@@ -41,6 +43,14 @@ export default function Home() {
         console.log('استخدام الصور الافتراضية لخطأ في الـ API:', err);
         useDefaultPhotos();
       });
+
+    fetch('/api/layout')
+      .then((r) => r.json())
+      .then((d) => {
+        const frames = normalizeFrames(d && d.frames);
+        setLayout(frames.length ? frames : DEFAULT_FRAMES);
+      })
+      .catch(() => setLayout(DEFAULT_FRAMES));
 
     function useDefaultPhotos() {
       setPhotos([
@@ -71,7 +81,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || photos.length === 0) return;
+    if (typeof window === 'undefined' || photos === null || layout === null) return;
 
     let disposed = false;
     let cleanupFn = null;
@@ -80,10 +90,10 @@ export default function Home() {
       const script = document.createElement('script');
       script.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
       script.async = true;
-      script.onload = () => { if (!disposed) cleanupFn = initGallery(photos); };
+      script.onload = () => { if (!disposed) cleanupFn = initGallery(photos, layout); };
       document.body.appendChild(script);
     } else {
-      cleanupFn = initGallery(photos);
+      cleanupFn = initGallery(photos, layout);
     }
 
     return () => {
@@ -91,56 +101,19 @@ export default function Home() {
       if (cleanupFn) cleanupFn();
     };
 
-    function initGallery(activePhotos) {
+    function initGallery(activePhotos, frames) {
       'use strict';
       const EYE_HEIGHT = 1.6;
       const SHOW_DIST = 3.5;   // مسافة ظهور لوحة المعلومات الزجاجية
       const OPEN_DIST = 2.0;   // مسافة السماح بفتح الصورة بالتكبير (مترين)
 
-      // مواقع اللوحات: الإحداثيات هنا هي بالضبط سطح الجدار المجاور (لا فراغ)،
-      // واللوحة تُغرَس جزئياً داخل الجدار عبر الإزاحة الصغيرة لاحقاً بدل أن
-      // تطفو أمامه. ٢٥ موقعاً مرقّمة ١..٢٥ لتطابق قائمة "موقع اللوحة" بلوحة
-      // التحكم (TOTAL_SLOTS في pages/admin/dashboard.js يجب أن يبقى مطابقاً).
-      const SLOTS = [
-        // الجدار الداخلي الأيسر (x=-5 سطحه عند -4.75)
-        { pos: [-4.75, EYE_HEIGHT, -10], rotY: Math.PI / 2 },
-        { pos: [-4.75, EYE_HEIGHT, -5], rotY: Math.PI / 2 },
-        { pos: [-4.75, EYE_HEIGHT, 0], rotY: Math.PI / 2 },
-        { pos: [-4.75, EYE_HEIGHT, 5], rotY: Math.PI / 2 },
-        { pos: [-4.75, EYE_HEIGHT, 10], rotY: Math.PI / 2 },
-        // الجدار الداخلي الأيمن (x=5 سطحه عند 4.75)
-        { pos: [4.75, EYE_HEIGHT, -10], rotY: -Math.PI / 2 },
-        { pos: [4.75, EYE_HEIGHT, -5], rotY: -Math.PI / 2 },
-        { pos: [4.75, EYE_HEIGHT, 0], rotY: -Math.PI / 2 },
-        { pos: [4.75, EYE_HEIGHT, 5], rotY: -Math.PI / 2 },
-        { pos: [4.75, EYE_HEIGHT, 10], rotY: -Math.PI / 2 },
-        // الجدار الخارجي الأيسر (x=-10 سطحه عند -9.7)
-        { pos: [-9.7, EYE_HEIGHT, -10], rotY: Math.PI / 2 },
-        { pos: [-9.7, EYE_HEIGHT, -5], rotY: Math.PI / 2 },
-        { pos: [-9.7, EYE_HEIGHT, 0], rotY: Math.PI / 2 },
-        { pos: [-9.7, EYE_HEIGHT, 5], rotY: Math.PI / 2 },
-        { pos: [-9.7, EYE_HEIGHT, 10], rotY: Math.PI / 2 },
-        // الجدار الخارجي الأيمن (x=10 سطحه عند 9.7)
-        { pos: [9.7, EYE_HEIGHT, -10], rotY: -Math.PI / 2 },
-        { pos: [9.7, EYE_HEIGHT, -5], rotY: -Math.PI / 2 },
-        { pos: [9.7, EYE_HEIGHT, 0], rotY: -Math.PI / 2 },
-        { pos: [9.7, EYE_HEIGHT, 5], rotY: -Math.PI / 2 },
-        { pos: [9.7, EYE_HEIGHT, 10], rotY: -Math.PI / 2 },
-        // الجدار الخلفي (z=-15 سطحه عند -14.7)
-        { pos: [-8, EYE_HEIGHT, -14.7], rotY: 0 },
-        { pos: [-4, EYE_HEIGHT, -14.7], rotY: 0 },
-        { pos: [0, EYE_HEIGHT, -14.7], rotY: 0 },
-        { pos: [4, EYE_HEIGHT, -14.7], rotY: 0 },
-        { pos: [8, EYE_HEIGHT, -14.7], rotY: 0 }
-      ];
-
-      // أبعاد أقصى للوحة (تحافظ على أبعاد الصورة الأصلية دون تمديد/قص،
-      // وتمنع تلامس اللوحات المتجاورة ببعضها)
-      const MAX_FRAME_W = 2.6;
-      const MAX_FRAME_H = 1.9;
-      const MAT_PADDING = 0.14;   // هامش الإطار حول الصورة
-      const FRAME_DEPTH = 0.07;   // سُمك الإطار (نصفه مغروس داخل الجدار)
-      const IMAGE_OFFSET = 0.045; // إزاحة الصورة أمام وجه الإطار مباشرة
+      // الإطارات (frames) تأتي من التخطيط المحفوظ بمحرر الإداريين (أو الافتراضي):
+      // كل إطار { n: رقمه, x, y, z: موضعه على سطح الجدار, r: دوران, s: مقياس }
+      const MAX_FRAME_W = FRAME_STYLE.MAX_W;
+      const MAX_FRAME_H = FRAME_STYLE.MAX_H;
+      const MAT_PADDING = FRAME_STYLE.PAD;       // هامش الإطار حول الصورة
+      const FRAME_DEPTH = FRAME_STYLE.DEPTH;     // سُمك الإطار (نصفه مغروس داخل الجدار)
+      const IMAGE_OFFSET = FRAME_STYLE.IMAGE_OFFSET; // إزاحة الصورة أمام وجه الإطار مباشرة
 
       function createWoodTexture() {
         const canvas = document.createElement('canvas');
@@ -200,7 +173,13 @@ export default function Home() {
       renderer.outputColorSpace = window.THREE.SRGBColorSpace;
       host.appendChild(renderer.domElement);
 
-      scene.add(new window.THREE.AmbientLight(0xfff5ea, 0.7));
+      // إضاءة ثابتة قليلة بدل كشّاف لكل إطار (٢٥+ كشّافاً ثقيلة جداً على الأجهزة
+      // الضعيفة، ولا تتأثر بنقل الإطارات من المحرر)
+      scene.add(new window.THREE.AmbientLight(0xfff5ea, 0.55));
+      scene.add(new window.THREE.HemisphereLight(0xfff1de, 0x3a2a1c, 0.28));
+      const sun = new window.THREE.DirectionalLight(0xfff0dd, 0.22);
+      sun.position.set(4, 9, 6);
+      scene.add(sun);
 
       const woodTex = createWoodTexture();
       woodTex.wrapS = woodTex.wrapT = window.THREE.RepeatWrapping;
@@ -221,41 +200,32 @@ export default function Home() {
         scene.add(m);
       }
 
-      addWall(30, 6, 0.6, 0, 3, -15);
-      addWall(0.6, 6, 30, -10, 3, 0);
-      addWall(0.6, 6, 30, 10, 3, 0);
-      addWall(0.5, 6, 20, -5, 3, 0);
-      addWall(0.5, 6, 20, 5, 3, 0);
+      ROOM_WALLS.forEach((w) => addWall(w[0], w[1], w[2], w[3], w[4], w[5]));
 
       const loader = new window.THREE.TextureLoader();
 
-      // توزيع اللوحات على المواقع: إن حدّد الأدمن "slot" (رقم موقع من ١ إلى
-      // ٢٥) تُعرض اللوحة في ذلك الموقع بالضبط، وإلا تُرتَّب تلقائياً بالترتيب
-      const usedSlotIdx = new Set();
-      activePhotos.forEach((ph) => { if (ph.slot) usedSlotIdx.add(ph.slot - 1); });
-      let autoCursor = 0;
-      function nextFreeSlot() {
-        while (usedSlotIdx.has(autoCursor)) autoCursor++;
-        usedSlotIdx.add(autoCursor);
-        return autoCursor;
-      }
+      // توزيع الصور على الإطارات: من حدّد لها الأدمن رقم إطار تذهب إليه، والباقي
+      // يملأ الإطارات الشاغرة بالترتيب. أي إطار بلا صورة يظهر فارغاً (برقمه)
+      // لتُرفع إليه لوحة لاحقاً.
+      const { byFrame } = assignPhotosToFrames(activePhotos, frames);
 
-      activePhotos.forEach((ph) => {
-        const slotIdx = (ph.slot && ph.slot >= 1) ? ph.slot - 1 : nextFreeSlot();
-        const slot = SLOTS[slotIdx];
-        if (!slot) return;
+      frames.forEach((fr) => {
+        const ph = byFrame.get(fr.n) || null;
+        const sc = fr.s || 1;
         const g = new window.THREE.Group();
         // الموضع = سطح الجدار بالضبط (بدون أي فراغ)
-        g.position.set(slot.pos[0], EYE_HEIGHT, slot.pos[2]);
-        g.rotation.y = slot.rotY;
-        g.userData = ph;
+        g.position.set(fr.x, fr.y, fr.z);
+        g.rotation.y = fr.r;
+        if (ph) g.userData = ph;
 
-        // حجم مبدئي مؤقت (نسبة 1.5) إلى حين تحميل الصورة الفعلية ومعرفة أبعادها
-        let w = 2.2, h = 1.47;
+        // حجم مبدئي (نسبة 3:2) إلى حين تحميل الصورة الفعلية ومعرفة أبعادها
+        const w = FRAME_STYLE.EMPTY_W * sc, h = FRAME_STYLE.EMPTY_H * sc;
 
         const imgMesh = new window.THREE.Mesh(
           new window.THREE.PlaneGeometry(w, h),
-          new window.THREE.MeshBasicMaterial({ color: 0x222222 })
+          ph
+            ? new window.THREE.MeshBasicMaterial({ color: 0x222222 })
+            : new window.THREE.MeshBasicMaterial({ map: makeEmptyFrameTexture(window.THREE, fr.n) })
         );
         imgMesh.position.z = IMAGE_OFFSET;
         g.add(imgMesh);
@@ -263,38 +233,28 @@ export default function Home() {
         // الإطار يتمركز عند سطح الجدار بالضبط (z محلي = 0)، فنصفه داخل
         // الجدار ونصفه بارز أمامه — لا يطفو بفراغ ولا يلتصق على الحافة فقط
         const frame = new window.THREE.Mesh(
-          new window.THREE.BoxGeometry(w + MAT_PADDING, h + MAT_PADDING, FRAME_DEPTH),
-          new window.THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 })
+          new window.THREE.BoxGeometry(w + MAT_PADDING * sc, h + MAT_PADDING * sc, FRAME_DEPTH),
+          new window.THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.45 })
         );
         g.add(frame);
-
-        const spot = new window.THREE.SpotLight(0xffeedd, 1.4, 6, Math.PI / 6, 0.5);
-        spot.position.set(slot.pos[0], EYE_HEIGHT + 1.5, slot.pos[2] + (slot.rotY === 0 ? 1 : -1));
-        spot.target = g;
-        scene.add(spot);
-
         scene.add(g);
+
+        if (!ph) return; // إطار فارغ: يُعرض فقط ولا يُفتح عند النقر
         hitGroups.push(g);
 
         loader.load(ph.url, (t) => {
-          t.colorSpace = window.THREE.SRGBColorSpace;
-
-          // نحافظ على أبعاد الصورة الأصلية (النسبة الحقيقية) دون أي قص أو
-          // تمديد، مع تحديدها بسقف أقصى (MAX_FRAME_W × MAX_FRAME_H) فقط
-          // لمنع تلامس اللوحات المتجاورة
-          const srcW = t.image?.width || 3;
-          const srcH = t.image?.height || 2;
-          const aspect = srcW / srcH;
-
-          let newW = MAX_FRAME_W, newH = MAX_FRAME_W / aspect;
-          if (newH > MAX_FRAME_H) { newH = MAX_FRAME_H; newW = MAX_FRAME_H * aspect; }
+          // نحافظ على أبعاد الصورة الأصلية (النسبة الحقيقية) دون قص أو تمديد،
+          // وتُعرض داخل الصالة بنسخة مصغّرة لتخفيف الحمل على الجهاز؛ الصورة
+          // الأصلية كاملة الجودة تُحمَّل فقط عند النقر على اللوحة (openFS)
+          const { map, aspect } = prepareDisplayTexture(window.THREE, t, 768);
+          const fit = fitImage(aspect, sc);
 
           imgMesh.geometry.dispose();
-          imgMesh.geometry = new window.THREE.PlaneGeometry(newW, newH);
-          imgMesh.material = new window.THREE.MeshBasicMaterial({ map: t });
+          imgMesh.geometry = new window.THREE.PlaneGeometry(fit.w, fit.h);
+          imgMesh.material = new window.THREE.MeshBasicMaterial({ map });
 
           frame.geometry.dispose();
-          frame.geometry = new window.THREE.BoxGeometry(newW + MAT_PADDING, newH + MAT_PADDING, FRAME_DEPTH);
+          frame.geometry = new window.THREE.BoxGeometry(fit.w + MAT_PADDING * sc, fit.h + MAT_PADDING * sc, FRAME_DEPTH);
         });
       });
 
@@ -357,15 +317,21 @@ export default function Home() {
       function onTouchStart(e) {
         if (fullscreenOpen || paused) return;
         for (const t of e.changedTouches) {
-          // منطقة الجويستيك الفعلية فقط (الربع السفلي الأيسر من الشاشة، حيث
-          // تظهر دائرة التحكم)، وليس كل الجهة اليسرى من الشاشة — هذا هو
-          // الإصلاح لمشكلة تفعّل الجويستيك من منتصف الشاشة
-          const isNearJoystick = t.clientX < window.innerWidth * 0.5 && t.clientY > window.innerHeight * 0.55;
+          // نحدد منطقة تفعيل الجويستيك من موقعه الحقيقي على الشاشة (مع هامش
+          // بسيط حوله لسهولة اللمس) بدل نسبة ثابتة من أبعاد الشاشة — هذا
+          // يضمن أن منطقة اللمس تطابق دائماً مكان ظهور الجويستيك فعلياً
+          let isNearJoystick = false;
+          let r = null;
+          if (joyZone) {
+            r = joyZone.getBoundingClientRect();
+            const pad = 34;
+            isNearJoystick = t.clientX >= r.left - pad && t.clientX <= r.right + pad &&
+              t.clientY >= r.top - pad && t.clientY <= r.bottom + pad;
+          }
           if (isNearJoystick && !state.joy.a) {
             state.joy.a = true;
             state.joy.id = t.identifier;
-            if (joyZone) {
-              const r = joyZone.getBoundingClientRect();
+            if (r) {
               state.joy.cx = r.left + r.width / 2;
               state.joy.cy = r.top + r.height / 2;
             }
@@ -509,8 +475,8 @@ export default function Home() {
         camera.rotation.x = state.pitch;
 
         if (!fullscreenOpen && !paused) {
-          // سرعة حركة بطيئة وواقعية
-          const speed = 0.04;
+          // سرعة حركة الكمبيوتر (لوحة المفاتيح) — كانت بطيئة فزيدت لحركة أسرع وأريح
+          const speed = 0.11;
 
           // اتجاه الأمام الفعلي للكاميرا (yaw=0 يعني النظر نحو -Z في Three.js)
           const forward = new window.THREE.Vector3(-Math.sin(state.yaw), 0, -Math.cos(state.yaw));
@@ -591,7 +557,7 @@ export default function Home() {
         if (host) host.innerHTML = '';
       };
     }
-  }, [photos]);
+  }, [photos, layout]);
 
   function startPresenceHeartbeat(name) {
     if (presenceTimerRef.current) clearInterval(presenceTimerRef.current);
@@ -621,10 +587,25 @@ export default function Home() {
     }
     setEntering(true);
     try {
+      // معلومات الجهاز (تُسجَّل في سجل الزوار): الدقة ونقاط اللمس واللغة، وموديل
+      // أندرويد إن أتاحه المتصفح. لا تتطلب أي إذن من الزائر ولا تتضمن موقعاً دقيقاً.
+      let model = null;
+      try {
+        if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+          const hv = await navigator.userAgentData.getHighEntropyValues(['model']);
+          model = hv && hv.model ? hv.model : null;
+        }
+      } catch (e2) { /* غير مدعوم */ }
       await fetch('/api/visits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ visitor_name: name })
+        body: JSON.stringify({
+          visitor_name: name,
+          screen: `${window.screen.width}x${window.screen.height}`,
+          touch: navigator.maxTouchPoints || 0,
+          lang: navigator.language || '',
+          model
+        })
       });
     } catch (e) {
       // لا نمنع الزائر من الدخول حتى لو فشل تسجيل الزيارة
@@ -828,9 +809,10 @@ export default function Home() {
           <div style={{ fontSize: '11px', letterSpacing: '.38em', color: '#8a7a56', marginBottom: '16px', fontFamily: "Georgia, serif" }}>TAIF&nbsp;PHOTOGRAPHY&nbsp;GALLERY</div>
 
           <p style={{ color: '#9a9388', fontSize: '13.5px', lineHeight: 1.9, marginBottom: '6px' }}>
-             جمعية الثقافة والفنون بالطائف
+            معرض الفوتوغرافيا الافتراضي — جمعية الثقافة والفنون بالطائف
           </p>
-          <div style={{ color: '#ff0000', fontSize: '10.5px', letterSpacing: '.12em', marginBottom: '26px', fontFamily: 'monospace' }}>
+          <div style={{ color: '#5f5848', fontSize: '10.5px', letterSpacing: '.12em', marginBottom: '26px', fontFamily: 'monospace' }}>
+            
             الموقع تحت الصيانه و الإنشاء حالياً تطوير : انور محمد بإشراف: عدنان الخمري — جمعية الثقافة والفنون بالطائف
           </div>
 
@@ -881,7 +863,7 @@ export default function Home() {
       </div>
 
       {/* أداة التحكم بالجوال (Joystick) */}
-      <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, display: 'none' }}>
+      <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, display: 'none', opacity: 0.3 }}>
         <div id="joyZone" style={{ width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(30, 25, 20, .42)', border: '1px solid rgba(255, 255, 255, .32)', position: 'relative', touchAction: 'none' }}>
           <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .95)', position: 'absolute', top: '31px', left: '31px', pointerEvents: 'none' }}></div>
         </div>

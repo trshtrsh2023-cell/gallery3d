@@ -1,0 +1,968 @@
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { useRouter } from 'next/router';
+import Head from 'next/head';
+import {
+  DEFAULT_FRAMES, FRAME_STYLE, FRAME_LIMITS, ROOM_WALLS,
+  normalizeFrames, assignPhotosToFrames, prepareDisplayTexture, fitImage, makeEmptyFrameTexture
+} from '../../lib/galleryLayout';
+
+// ============================================================================
+// محرر صالة المعرض للإداريين — وضع الطيران الحر + تحريك/تدوير/تحجيم/ترقيم الإطارات
+// ============================================================================
+
+let uidCounter = 1;
+const newUid = () => 'f' + (uidCounter++);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const r3 = (v) => Math.round(v * 1000) / 1000;
+const RAD2DEG = 180 / Math.PI;
+
+// ---------------------------------------------------------------------------
+// محرّك ثلاثي الأبعاد (Three.js) — يعمل خارج React ويتواصل معه عبر cb
+// ---------------------------------------------------------------------------
+function createEngine(THREE, host, cb) {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x14110e);
+  const camera = new THREE.PerspectiveCamera(65, 1, 0.05, 400);
+  camera.rotation.order = 'YXZ';
+  camera.position.set(0, 2.4, 13.5);
+  let yaw = 0;
+  let pitch = -0.12;
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  host.appendChild(renderer.domElement);
+  const dom = renderer.domElement;
+  dom.style.display = 'block';
+  dom.tabIndex = 0;
+  dom.style.outline = 'none';
+
+  scene.add(new THREE.AmbientLight(0xfff5ea, 0.6));
+  scene.add(new THREE.HemisphereLight(0xfff1de, 0x3a2a1c, 0.3));
+  const sun = new THREE.DirectionalLight(0xfff0dd, 0.25);
+  sun.position.set(6, 12, 8);
+  scene.add(sun);
+
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(90, 90), new THREE.MeshStandardMaterial({ color: 0x4a3322, roughness: 0.75 }));
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+  const grid = new THREE.GridHelper(90, 90, 0x8a7448, 0x3a3025);
+  grid.position.y = 0.012;
+  scene.add(grid);
+
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xe3ddd3, roughness: 0.85 });
+  const walls = [];
+  ROOM_WALLS.forEach((w) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w[0], w[1], w[2]), wallMat);
+    m.position.set(w[3], w[4], w[5]);
+    scene.add(m);
+    walls.push(m);
+  });
+
+  // ---- خامات الصور (نسخ مصغّرة مخزّنة مؤقتاً حسب الرابط) ----
+  const loader = new THREE.TextureLoader();
+  const texCache = new Map();
+  function loadPhoto(url, done) {
+    let e = texCache.get(url);
+    if (e) { if (e.map) done(e); else if (!e.failed) e.waiters.push(done); return; }
+    e = { map: null, aspect: 1.5, waiters: [done], failed: false };
+    texCache.set(url, e);
+    loader.load(url, (t) => {
+      const r = prepareDisplayTexture(THREE, t, 512);
+      e.map = r.map; e.aspect = r.aspect;
+      e.waiters.splice(0).forEach((fn) => fn(e));
+    }, undefined, () => { e.failed = true; e.waiters.length = 0; });
+  }
+
+  // ---- عقد الإطارات ----
+  const nodes = new Map();
+  const D = FRAME_STYLE;
+
+  function makeLabelTexture(n) {
+    const c = document.createElement('canvas');
+    c.width = 160; c.height = 80;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = 'rgba(15,12,9,.88)';
+    const rr = 18;
+    ctx.beginPath();
+    ctx.moveTo(rr, 4); ctx.lineTo(160 - rr, 4); ctx.quadraticCurveTo(156, 4, 156, rr);
+    ctx.lineTo(156, 80 - rr); ctx.quadraticCurveTo(156, 76, 160 - rr, 76);
+    ctx.lineTo(rr, 76); ctx.quadraticCurveTo(4, 76, 4, 80 - rr);
+    ctx.lineTo(4, rr); ctx.quadraticCurveTo(4, 4, rr, 4);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(201,163,91,.9)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#f5d98c';
+    ctx.font = '700 44px Tahoma, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(n), 80, 42);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+
+  function createNode(uid) {
+    const group = new THREE.Group();
+    const img = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: 0x222222 }));
+    img.position.z = D.IMAGE_OFFSET;
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(1, 1, D.DEPTH), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.45 }));
+    img.userData.uid = uid;
+    frame.userData.uid = uid;
+    const outline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 0.14)),
+      new THREE.LineBasicMaterial({ color: 0xffc94d })
+    );
+    const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0.08), 0.9, 0xffc94d, 0.26, 0.16);
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeLabelTexture(0), depthTest: true }));
+    label.scale.set(0.5, 0.25, 1);
+    group.add(frame, img, outline, arrow, label);
+    outline.visible = false;
+    arrow.visible = false;
+    return { uid, group, img, frame, outline, arrow, label, mode: null, photoUrl: null, emptyN: null, emptyTex: null, labelN: null, aspect: 1.5, s: 1 };
+  }
+
+  function layoutNode(nd) {
+    let w, h;
+    if (nd.photoUrl) {
+      const f = fitImage(nd.aspect, nd.s);
+      w = f.w; h = f.h;
+    } else {
+      w = D.EMPTY_W * nd.s; h = D.EMPTY_H * nd.s;
+    }
+    nd.img.scale.set(w, h, 1);
+    nd.frame.scale.set(w + D.PAD * nd.s, h + D.PAD * nd.s, 1);
+    nd.outline.scale.set(w + D.PAD * nd.s + 0.1, h + D.PAD * nd.s + 0.1, 1);
+    nd.label.position.set(0, (h + D.PAD * nd.s) / 2 + 0.22, 0.12);
+  }
+
+  function sync(list, selectedUid) {
+    const alive = new Set();
+    list.forEach((f) => {
+      alive.add(f.uid);
+      let nd = nodes.get(f.uid);
+      if (!nd) { nd = createNode(f.uid); nodes.set(f.uid, nd); scene.add(nd.group); }
+      nd.group.position.set(f.x, f.y, f.z);
+      nd.group.rotation.y = f.r;
+      nd.s = f.s;
+
+      if (f.photoUrl) {
+        if (nd.mode !== 'photo' || nd.photoUrl !== f.photoUrl) {
+          nd.mode = 'photo';
+          nd.photoUrl = f.photoUrl;
+          nd.aspect = 1.5;
+          nd.img.material = new THREE.MeshBasicMaterial({ color: 0x2a2a2a });
+          const url = f.photoUrl;
+          loadPhoto(url, (e) => {
+            if (nd.photoUrl !== url || !e.map) return;
+            nd.img.material = new THREE.MeshBasicMaterial({ map: e.map });
+            nd.aspect = e.aspect;
+            layoutNode(nd);
+          });
+        }
+      } else if (nd.mode !== 'empty' || nd.emptyN !== f.n) {
+        nd.mode = 'empty';
+        nd.photoUrl = null;
+        if (nd.emptyTex) nd.emptyTex.dispose();
+        nd.emptyTex = makeEmptyFrameTexture(THREE, f.n);
+        nd.emptyN = f.n;
+        nd.img.material = new THREE.MeshBasicMaterial({ map: nd.emptyTex });
+      }
+
+      if (nd.labelN !== f.n) {
+        if (nd.label.material.map) nd.label.material.map.dispose();
+        nd.label.material.map = makeLabelTexture(f.n);
+        nd.label.material.needsUpdate = true;
+        nd.labelN = f.n;
+      }
+      layoutNode(nd);
+      const on = f.uid === selectedUid;
+      nd.outline.visible = on;
+      nd.arrow.visible = on;
+    });
+    nodes.forEach((nd, uid) => {
+      if (alive.has(uid)) return;
+      scene.remove(nd.group);
+      if (nd.emptyTex) nd.emptyTex.dispose();
+      if (nd.label.material.map) nd.label.material.map.dispose();
+      nodes.delete(uid);
+    });
+  }
+
+  // ---- اختيار/سحب ----
+  const ray = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  function castFromEvent(ev) {
+    const rect = dom.getBoundingClientRect();
+    ndc.set(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    return ray;
+  }
+  function framePickables() {
+    const out = [];
+    nodes.forEach((nd) => out.push(nd.frame, nd.img));
+    return out;
+  }
+  // يحوّل نقطة اصطدام بجدار إلى موضع/دوران إطار ملاصق للسطح (أو null للأسطح الأفقية)
+  function placementFromHit(h) {
+    const n = h.face.normal.clone().transformDirection(h.object.matrixWorld);
+    if (Math.abs(n.y) > 0.5) return null;
+    const axis = Math.abs(n.x) > Math.abs(n.z) ? 'x' : 'z';
+    return { x: h.point.x, y: h.point.y, z: h.point.z, r: Math.atan2(n.x, n.z), axis };
+  }
+  function wallPlacement(rayObj) {
+    const hits = rayObj.intersectObjects(walls, false);
+    for (const h of hits) {
+      const p = placementFromHit(h);
+      if (p) return p;
+    }
+    return null;
+  }
+
+  let looking = false;
+  let dragging = null;
+  let lastX = 0;
+  let lastY = 0;
+  const keys = new Set();
+  let speed = 5;
+
+  function onContext(e) { e.preventDefault(); }
+  function onDown(e) {
+    dom.focus();
+    if (e.button === 2 || e.button === 1) {
+      looking = true; lastX = e.clientX; lastY = e.clientY; e.preventDefault();
+      return;
+    }
+    if (e.button === 0) {
+      const hits = castFromEvent(e).intersectObjects([...framePickables(), ...walls], false);
+      const h = hits[0];
+      if (h && h.object.userData.uid) {
+        cb.select(h.object.userData.uid);
+        dragging = { uid: h.object.userData.uid, started: false, sx: e.clientX, sy: e.clientY };
+      } else {
+        cb.select(null);
+      }
+    }
+  }
+  function onMove(e) {
+    if (looking) {
+      yaw -= (e.clientX - lastX) * 0.0035;
+      pitch -= (e.clientY - lastY) * 0.0035;
+      pitch = clamp(pitch, -1.5, 1.5);
+      lastX = e.clientX; lastY = e.clientY;
+      return;
+    }
+    if (dragging) {
+      if (!dragging.started) {
+        if (Math.hypot(e.clientX - dragging.sx, e.clientY - dragging.sy) < 5) return;
+        dragging.started = true;
+        cb.beginGesture();
+      }
+      const p = wallPlacement(castFromEvent(e));
+      if (!p) return;
+      const step = cb.snapStep();
+      let { x, y, z } = p;
+      if (step) {
+        y = Math.round(y / step) * step;
+        if (p.axis === 'x') z = Math.round(z / step) * step; else x = Math.round(x / step) * step;
+      }
+      cb.move(dragging.uid, { x: r3(x), y: r3(clamp(y, FRAME_LIMITS.Y_MIN, FRAME_LIMITS.Y_MAX)), z: r3(z), r: r3(p.r) });
+    }
+  }
+  function onUp(e) {
+    if (e.button === 0) dragging = null;
+    if (e.button === 2 || e.button === 1) looking = false;
+  }
+  function onWheel(e) {
+    e.preventDefault();
+    speed = clamp(speed * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 0.5, 40);
+    cb.speed(speed);
+  }
+  function isTyping(e) {
+    const t = e.target;
+    return t && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName);
+  }
+  function onKeyDown(e) {
+    if (isTyping(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+    keys.add(e.code);
+  }
+  function onKeyUp(e) { keys.delete(e.code); }
+  function onBlur() { keys.clear(); looking = false; dragging = null; }
+
+  dom.addEventListener('contextmenu', onContext);
+  dom.addEventListener('mousedown', onDown);
+  dom.addEventListener('wheel', onWheel, { passive: false });
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', onBlur);
+
+  function resize() {
+    const w = host.clientWidth || 800;
+    const h = host.clientHeight || 600;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  resize();
+  const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null;
+  if (ro) ro.observe(host);
+
+  // ---- حلقة الرسم + الطيران ----
+  const clock = new THREE.Clock();
+  let raf = 0;
+  const fwd = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const mv = new THREE.Vector3();
+  function animate() {
+    raf = requestAnimationFrame(animate);
+    const dt = Math.min(clock.getDelta(), 0.1);
+    camera.rotation.set(pitch, yaw, 0);
+    fwd.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+    right.set(Math.cos(yaw), 0, -Math.sin(yaw));
+    mv.set(0, 0, 0);
+    if (keys.has('KeyW')) mv.add(fwd);
+    if (keys.has('KeyS')) mv.sub(fwd);
+    if (keys.has('KeyD')) mv.add(right);
+    if (keys.has('KeyA')) mv.sub(right);
+    if (keys.has('KeyE') || keys.has('Space')) mv.y += 1;
+    if (keys.has('KeyQ') || keys.has('KeyC')) mv.y -= 1;
+    if (mv.lengthSq() > 0) {
+      mv.normalize().multiplyScalar(speed * dt * (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 3 : 1));
+      camera.position.add(mv);
+      camera.position.y = Math.max(0.2, camera.position.y);
+    }
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // ---- واجهة يستدعيها React ----
+  return {
+    sync,
+    setSpeed(v) { speed = v; },
+    focusFrame(f) {
+      const d = 3.4 * Math.max(1, f.s);
+      camera.position.set(f.x + Math.sin(f.r) * d, Math.max(0.6, f.y + 0.15), f.z + Math.cos(f.r) * d);
+      yaw = f.r;
+      pitch = 0;
+    },
+    // موضع إطار جديد: حيث تُصيب نظرة الكاميرا جداراً، وإلا أمام الكاميرا مباشرة
+    frontPlacement() {
+      ray.set(camera.position.clone(), fwd.clone().normalize());
+      const p = wallPlacement(ray);
+      if (p) return { x: r3(p.x), y: r3(clamp(p.y, FRAME_LIMITS.Y_MIN, FRAME_LIMITS.Y_MAX)), z: r3(p.z), r: r3(p.r) };
+      const hx = -Math.sin(yaw);
+      const hz = -Math.cos(yaw);
+      return { x: r3(camera.position.x + hx * 4), y: 1.6, z: r3(camera.position.z + hz * 4), r: r3(yaw) };
+    },
+    // يلصق الإطار بأقرب جدار (يُجرَّب الاتجاهات الأربعة من أمام الإطار)
+    snapToWall(f) {
+      const nx = Math.sin(f.r);
+      const nz = Math.cos(f.r);
+      const origin = new THREE.Vector3(f.x + nx * 0.3, f.y, f.z + nz * 0.3);
+      let best = null;
+      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
+        ray.set(origin, new THREE.Vector3(dx, 0, dz));
+        const hits = ray.intersectObjects(walls, false);
+        for (const h of hits) {
+          const p = placementFromHit(h);
+          if (p) { if (!best || h.distance < best.d) best = { d: h.distance, p }; break; }
+        }
+      });
+      if (!best) return null;
+      return { x: r3(best.p.x), y: f.y, z: r3(best.p.z), r: r3(best.p.r) };
+    },
+    dispose() {
+      cancelAnimationFrame(raf);
+      dom.removeEventListener('contextmenu', onContext);
+      dom.removeEventListener('mousedown', onDown);
+      dom.removeEventListener('wheel', onWheel);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+      if (ro) ro.disconnect();
+      renderer.dispose();
+      if (dom.parentNode) dom.parentNode.removeChild(dom);
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// حقل رقمي بمسودة نصية (يسمح بكتابة "-" و"." أثناء الإدخال) + أسهم ↑↓
+// ---------------------------------------------------------------------------
+function NumField({ label, value, onChange, step = 0.05, digits = 2, suffix }) {
+  const fmt = (v) => String(Math.round(v * 10 ** digits) / 10 ** digits);
+  const [txt, setTxt] = useState(fmt(value));
+  const [focus, setFocus] = useState(false);
+  useEffect(() => { if (!focus) setTxt(fmt(value)); }, [value, focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <label className="nf">
+      <span>{label}</span>
+      <div className="nfbox">
+        <input
+          dir="ltr"
+          inputMode="decimal"
+          value={txt}
+          onFocus={() => setFocus(true)}
+          onBlur={() => { setFocus(false); setTxt(fmt(value)); }}
+          onChange={(e) => {
+            setTxt(e.target.value);
+            const n = parseFloat(e.target.value);
+            if (Number.isFinite(n)) onChange(n);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowUp') { e.preventDefault(); onChange(value + step); }
+            if (e.key === 'ArrowDown') { e.preventDefault(); onChange(value - step); }
+          }}
+        />
+        {suffix && <em>{suffix}</em>}
+      </div>
+    </label>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// الصفحة
+// ---------------------------------------------------------------------------
+export default function GalleryEditor() {
+  const router = useRouter();
+  const hostRef = useRef(null);
+  const engineRef = useRef(null);
+
+  const [loading, setLoading] = useState(true);
+  const [threeReady, setThreeReady] = useState(false);
+  const [engineReady, setEngineReady] = useState(false);
+  const [frames, setFrames] = useState([]);
+  const [photos, setPhotos] = useState([]);
+  const [photoOf, setPhotoOf] = useState({});
+  const [sel, setSel] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [snap, setSnap] = useState(false);
+  const [speed, setSpeed] = useState(5);
+  const [help, setHelp] = useState(true);
+  const [nDraft, setNDraft] = useState('');
+  const [isDefault, setIsDefault] = useState(false);
+
+  const undoRef = useRef([]);
+  const redoRef = useRef([]);
+  const lastUndo = useRef({ key: null, t: 0 });
+  const live = useRef({});
+  live.current = { frames, photoOf, sel, snap, photos };
+  const cbRef = useRef({});
+
+  const selFrame = frames.find((f) => f.uid === sel) || null;
+  const photoById = {};
+  photos.forEach((p) => { photoById[String(p.id)] = p; });
+  const placedIds = new Set(Object.values(photoOf));
+  const unplaced = photos.filter((p) => !placedIds.has(String(p.id)));
+  const filled = frames.filter((f) => photoOf[f.uid]).length;
+
+  const showToast = useCallback((msg, kind = 'ok') => {
+    setToast({ msg, kind });
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => setToast(null), 3200);
+  }, []);
+
+  // ---- تحميل البيانات + التحقق من الجلسة ----
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const me = await fetch('/api/admin/me').catch(() => null);
+      if (!me || !me.ok) { router.replace('/admin/login'); return; }
+      const [lay, ph] = await Promise.all([
+        fetch('/api/layout').then((r) => r.json()).catch(() => null),
+        fetch('/api/admin/photos').then((r) => (r.ok ? r.json() : [])).catch(() => [])
+      ]);
+      if (cancelled) return;
+      const base = normalizeFrames(lay && lay.frames);
+      const list = (base.length ? base : DEFAULT_FRAMES).map((f) => ({ ...f, uid: newUid() }));
+      const phArr = Array.isArray(ph) ? ph : [];
+      const { byFrame } = assignPhotosToFrames(phArr, list, (p) => p.slot_index);
+      const po = {};
+      list.forEach((f) => { const p = byFrame.get(f.n); if (p) po[f.uid] = String(p.id); });
+      setFrames(list);
+      setPhotos(phArr);
+      setPhotoOf(po);
+      setIsDefault(!!(lay && lay.isDefault));
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---- تحميل Three.js ----
+  useEffect(() => {
+    if (window.THREE) { setThreeReady(true); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+    s.async = true;
+    s.onload = () => setThreeReady(true);
+    document.body.appendChild(s);
+  }, []);
+
+  // ---- إنشاء المحرك ----
+  useEffect(() => {
+    if (!threeReady || loading || !hostRef.current) return undefined;
+    const eng = createEngine(window.THREE, hostRef.current, {
+      select: (uid) => cbRef.current.select(uid),
+      beginGesture: () => cbRef.current.beginGesture(),
+      move: (uid, p) => cbRef.current.move(uid, p),
+      speed: (v) => setSpeed(Math.round(v * 10) / 10),
+      snapStep: () => (live.current.snap ? 0.25 : 0)
+    });
+    engineRef.current = eng;
+    setEngineReady(true);
+    return () => { eng.dispose(); engineRef.current = null; setEngineReady(false); };
+  }, [threeReady, loading]);
+
+  // ---- مزامنة الحالة -> المشهد ----
+  useEffect(() => {
+    if (!engineReady || !engineRef.current) return;
+    engineRef.current.sync(
+      frames.map((f) => ({ ...f, photoUrl: photoOf[f.uid] && photoById[photoOf[f.uid]] ? photoById[photoOf[f.uid]].image_url : null })),
+      sel
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engineReady, frames, photoOf, photos, sel]);
+
+  useEffect(() => { setNDraft(selFrame ? String(selFrame.n) : ''); }, [sel, selFrame && selFrame.n]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- تحذير قبل المغادرة مع تعديلات غير محفوظة ----
+  useEffect(() => {
+    const h = (e) => { if (live.current.dirty) { e.preventDefault(); e.returnValue = ''; } };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, []);
+  live.current.dirty = dirty;
+
+  // ---- التراجع/الإعادة ----
+  const snapshot = () => JSON.stringify({ frames: live.current.frames, photoOf: live.current.photoOf });
+  const pushUndo = useCallback((key) => {
+    const now = Date.now();
+    if (key && lastUndo.current.key === key && now - lastUndo.current.t < 900) { lastUndo.current.t = now; return; }
+    lastUndo.current = { key: key || null, t: now };
+    undoRef.current.push(snapshot());
+    if (undoRef.current.length > 60) undoRef.current.shift();
+    redoRef.current = [];
+  }, []);
+  const applySnapshot = (str) => {
+    const o = JSON.parse(str);
+    setFrames(o.frames);
+    setPhotoOf(o.photoOf);
+    setDirty(true);
+    if (live.current.sel && !o.frames.some((f) => f.uid === live.current.sel)) setSel(null);
+  };
+  const undo = () => {
+    const s = undoRef.current.pop();
+    if (!s) { showToast('لا يوجد ما يُتراجع عنه', 'warn'); return; }
+    redoRef.current.push(snapshot());
+    lastUndo.current = { key: null, t: 0 };
+    applySnapshot(s);
+  };
+  const redo = () => {
+    const s = redoRef.current.pop();
+    if (!s) return;
+    undoRef.current.push(snapshot());
+    applySnapshot(s);
+  };
+
+  // ---- العمليات على الإطارات ----
+  const updateFrame = (uid, patch, key) => {
+    pushUndo(key || ('u:' + uid + ':' + Object.keys(patch).join(',')));
+    setFrames((fs) => fs.map((f) => (f.uid === uid ? { ...f, ...patch } : f)));
+    setDirty(true);
+  };
+  const nextFreeN = () => {
+    const used = new Set(live.current.frames.map((f) => f.n));
+    let n = 1;
+    while (used.has(n)) n++;
+    return n;
+  };
+  const addFrame = (place, extra) => {
+    if (live.current.frames.length >= FRAME_LIMITS.MAX_FRAMES) { showToast('وصلت للحد الأقصى من الإطارات (' + FRAME_LIMITS.MAX_FRAMES + ')', 'warn'); return; }
+    pushUndo();
+    const f = { uid: newUid(), n: nextFreeN(), x: 0, y: 1.6, z: 0, r: 0, s: 1, ...place, ...(extra || {}) };
+    setFrames((fs) => [...fs, f].sort((a, b) => a.n - b.n));
+    setSel(f.uid);
+    setDirty(true);
+    showToast('أُضيف الإطار رقم ' + f.n);
+  };
+  const addAtCamera = () => {
+    if (!engineRef.current) return;
+    addFrame(engineRef.current.frontPlacement());
+  };
+  const duplicateSel = () => {
+    if (!selFrame) return;
+    const tx = Math.cos(selFrame.r);
+    const tz = -Math.sin(selFrame.r);
+    const off = FRAME_STYLE.MAX_W * selFrame.s + 0.4;
+    addFrame({ x: r3(selFrame.x + tx * off), y: selFrame.y, z: r3(selFrame.z + tz * off), r: selFrame.r, s: selFrame.s });
+  };
+  const deleteSel = () => {
+    if (!selFrame) return;
+    const hadPhoto = photoOf[selFrame.uid];
+    if (!window.confirm('حذف الإطار رقم ' + selFrame.n + '؟' + (hadPhoto ? '\nالصورة التي فيه ستبقى محفوظة لكنها ستنتقل تلقائياً لأول إطار شاغر.' : ''))) return;
+    pushUndo();
+    setFrames((fs) => fs.filter((f) => f.uid !== selFrame.uid));
+    setPhotoOf((m) => { const c = { ...m }; delete c[selFrame.uid]; return c; });
+    setSel(null);
+    setDirty(true);
+  };
+  const assignPhoto = (uid, pid) => {
+    pushUndo();
+    setPhotoOf((m) => {
+      const c = { ...m };
+      if (pid) Object.keys(c).forEach((k) => { if (c[k] === pid) delete c[k]; });
+      if (pid) c[uid] = pid; else delete c[uid];
+      return c;
+    });
+    setDirty(true);
+  };
+  const snapSelToWall = () => {
+    if (!selFrame || !engineRef.current) return;
+    const p = engineRef.current.snapToWall(selFrame);
+    if (!p) { showToast('لم أجد جداراً قريباً', 'warn'); return; }
+    updateFrame(selFrame.uid, p);
+    showToast('أُلصق الإطار بأقرب جدار');
+  };
+  const focusFrame = (f) => {
+    setSel(f.uid);
+    if (engineRef.current) engineRef.current.focusFrame(f);
+  };
+  const applyN = (txt) => {
+    setNDraft(txt);
+    if (!selFrame) return;
+    const n = Math.round(Number(txt));
+    if (!txt || !Number.isInteger(n) || n < 1 || n > 999) return;
+    if (frames.some((f) => f.uid !== selFrame.uid && f.n === n)) return;
+    if (n === selFrame.n) return;
+    updateFrame(selFrame.uid, { n }, 'n:' + selFrame.uid);
+    setFrames((fs) => [...fs].sort((a, b) => a.n - b.n));
+  };
+  const nError = selFrame && nDraft !== '' && (() => {
+    const n = Math.round(Number(nDraft));
+    if (!Number.isInteger(n) || n < 1 || n > 999) return 'رقم من 1 إلى 999';
+    if (frames.some((f) => f.uid !== selFrame.uid && f.n === n)) return 'هذا الرقم مستخدم لإطار آخر';
+    return null;
+  })();
+
+  // ---- الحفظ ----
+  const save = async () => {
+    if (saving) return;
+    if (!frames.length) { showToast('لا يمكن حفظ تخطيط بلا إطارات', 'err'); return; }
+    setSaving(true);
+    try {
+      const payloadFrames = frames.map((f) => ({ n: f.n, x: r3(f.x), y: r3(f.y), z: r3(f.z), r: r3(f.r), s: r3(f.s) }));
+      const uidByPhoto = {};
+      Object.keys(photoOf).forEach((uid) => { uidByPhoto[photoOf[uid]] = uid; });
+      const photoSlots = {};
+      photos.forEach((p) => {
+        const uid = uidByPhoto[String(p.id)];
+        const fr = uid ? frames.find((f) => f.uid === uid) : null;
+        photoSlots[p.id] = fr ? fr.n : null;
+      });
+      const res = await fetch('/api/layout', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ frames: payloadFrames, photoSlots })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(data.error || 'فشل الحفظ', 'err'); setSaving(false); return; }
+      setDirty(false);
+      setIsDefault(false);
+      showToast('تم حفظ التخطيط — سيراه الزوار فوراً');
+    } catch (e) {
+      showToast('تعذّر الاتصال بالخادم', 'err');
+    }
+    setSaving(false);
+  };
+
+  const resetDefault = () => {
+    if (!window.confirm('استعادة التخطيط الافتراضي (٢٥ إطاراً)؟ لن يُحفظ إلا بعد ضغط "حفظ".')) return;
+    pushUndo();
+    const list = DEFAULT_FRAMES.map((f) => ({ ...f, uid: newUid() }));
+    const { byFrame } = assignPhotosToFrames(photos, list, (p) => p.slot_index);
+    const po = {};
+    list.forEach((f) => { const p = byFrame.get(f.n); if (p) po[f.uid] = String(p.id); });
+    setFrames(list);
+    setPhotoOf(po);
+    setSel(null);
+    setDirty(true);
+  };
+
+  // ---- ربط ردود المحرك بآخر حالة React ----
+  cbRef.current = {
+    select: (uid) => setSel(uid),
+    beginGesture: () => pushUndo(),
+    move: (uid, p) => { setFrames((fs) => fs.map((f) => (f.uid === uid ? { ...f, ...p } : f))); setDirty(true); }
+  };
+
+  // ---- اختصارات لوحة المفاتيح ----
+  useEffect(() => {
+    const onKey = (e) => {
+      const typing = e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') { e.preventDefault(); save(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') { e.preventDefault(); redo(); return; }
+      if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+      const f = live.current.frames.find((x) => x.uid === live.current.sel);
+      if (!f) return;
+      const stepMove = e.shiftKey ? 0.25 : 0.05;
+      if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+        e.preventDefault();
+        const d = (e.code === 'ArrowRight' ? 1 : -1) * stepMove;
+        updateFrame(f.uid, { x: r3(f.x + Math.cos(f.r) * d), z: r3(f.z - Math.sin(f.r) * d) }, 'nudge');
+      } else if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+        e.preventDefault();
+        const d = (e.code === 'ArrowUp' ? 1 : -1) * stepMove;
+        updateFrame(f.uid, { y: r3(clamp(f.y + d, FRAME_LIMITS.Y_MIN, FRAME_LIMITS.Y_MAX)) }, 'nudge');
+      } else if (e.code === 'BracketRight' || e.code === 'BracketLeft') {
+        const d = e.code === 'BracketRight' ? 0.05 : -0.05;
+        updateFrame(f.uid, { s: r3(clamp(f.s + d, FRAME_LIMITS.S_MIN, FRAME_LIMITS.S_MAX)) }, 'scale');
+      } else if (e.code === 'Delete') {
+        deleteSel();
+      } else if (e.code === 'Escape') {
+        setSel(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+
+  async function handleLogout() {
+    await fetch('/api/admin/logout', { method: 'POST' });
+    router.push('/');
+  }
+
+  const deg = selFrame ? ((selFrame.r * RAD2DEG) % 360 + 360) % 360 : 0;
+
+  if (loading) {
+    return <div className="ed-loading" dir="rtl"><style dangerouslySetInnerHTML={{ __html: CSS }} />جاري تحميل المحرر…</div>;
+  }
+
+  return (
+    <div className="ed" dir="rtl">
+      <Head>
+        <title>محرر الصالة — لوحة الإدارة</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </Head>
+      <style dangerouslySetInnerHTML={{ __html: CSS }} />
+
+      <aside className="panel">
+        <div className="brand">
+          <div className="logo">▣</div>
+          <div>
+            <h1>محرر الصالة</h1>
+            <p>الإطارات والمواقع ثلاثية الأبعاد</p>
+          </div>
+        </div>
+
+        <div className="stats">
+          <div><b>{frames.length}</b><span>إطار</span></div>
+          <div><b>{filled}</b><span>ممتلئ</span></div>
+          <div><b>{frames.length - filled}</b><span>فارغ</span></div>
+        </div>
+        {unplaced.length > 0 && (
+          <div className="note warn">{unplaced.length} صورة بلا إطار (لا يوجد إطار شاغر) — أضف إطارات أو بدّل صوراً.</div>
+        )}
+        {isDefault && <div className="note">التخطيط الحالي افتراضي ولم يُحفظ بعد في قاعدة البيانات.</div>}
+
+        <section>
+          <h3>الإطارات <small>(اضغط للانتقال إليه)</small></h3>
+          <div className="chips">
+            {frames.map((f) => (
+              <button key={f.uid} className={'chip' + (f.uid === sel ? ' on' : '') + (photoOf[f.uid] ? ' full' : '')} onClick={() => focusFrame(f)} title={photoOf[f.uid] ? 'ممتلئ' : 'فارغ'}>
+                {f.n}
+              </button>
+            ))}
+          </div>
+          <div className="legend"><i className="dot full" /> ممتلئ <i className="dot" /> فارغ</div>
+        </section>
+
+        <section>
+          <h3>إضافة إطار</h3>
+          <button className="btn wide" onClick={addAtCamera}>+ إطار جديد حيث أنظر</button>
+          <p className="hint">يُلصق تلقائياً على الجدار الذي تنظر إليه الكاميرا.</p>
+        </section>
+
+        {selFrame ? (
+          <section className="sel">
+            <h3>الإطار المحدد <span className="selnum">{selFrame.n}</span></h3>
+
+            <label className="nf">
+              <span>رقم الإطار</span>
+              <div className="nfbox">
+                <input dir="ltr" inputMode="numeric" value={nDraft} onChange={(e) => applyN(e.target.value)} onBlur={() => setNDraft(String(selFrame.n))} />
+              </div>
+              {nError && <small className="err">{nError}</small>}
+            </label>
+
+            <label className="nf">
+              <span>الصورة داخل الإطار</span>
+              <select value={photoOf[selFrame.uid] || ''} onChange={(e) => assignPhoto(selFrame.uid, e.target.value || null)}>
+                <option value="">— فارغ —</option>
+                {photos.map((p) => (
+                  <option key={p.id} value={String(p.id)}>{p.title || 'بدون عنوان'}{placedIds.has(String(p.id)) && photoOf[selFrame.uid] !== String(p.id) ? ' (في إطار آخر)' : ''}</option>
+                ))}
+              </select>
+            </label>
+
+            <div className="grid3">
+              <NumField label="X" value={selFrame.x} onChange={(v) => updateFrame(selFrame.uid, { x: r3(clamp(v, -FRAME_LIMITS.POS, FRAME_LIMITS.POS)) }, 'x')} />
+              <NumField label="الارتفاع Y" value={selFrame.y} onChange={(v) => updateFrame(selFrame.uid, { y: r3(clamp(v, FRAME_LIMITS.Y_MIN, FRAME_LIMITS.Y_MAX)) }, 'y')} />
+              <NumField label="Z" value={selFrame.z} onChange={(v) => updateFrame(selFrame.uid, { z: r3(clamp(v, -FRAME_LIMITS.POS, FRAME_LIMITS.POS)) }, 'z')} />
+            </div>
+
+            <div className="grid2">
+              <NumField label="الدوران" suffix="°" digits={1} step={5} value={deg} onChange={(v) => updateFrame(selFrame.uid, { r: r3((v * Math.PI) / 180) }, 'rot')} />
+              <NumField label="الحجم ×" digits={2} step={0.05} value={selFrame.s} onChange={(v) => updateFrame(selFrame.uid, { s: r3(clamp(v, FRAME_LIMITS.S_MIN, FRAME_LIMITS.S_MAX)) }, 'scale')} />
+            </div>
+            <input
+              className="range"
+              type="range"
+              min={FRAME_LIMITS.S_MIN}
+              max={2.5}
+              step="0.05"
+              value={selFrame.s}
+              onChange={(e) => updateFrame(selFrame.uid, { s: r3(parseFloat(e.target.value)) }, 'scale')}
+            />
+
+            <div className="row">
+              <button className="btn" onClick={() => updateFrame(selFrame.uid, { r: r3(selFrame.r - Math.PI / 2) })}>↺ 90°</button>
+              <button className="btn" onClick={() => updateFrame(selFrame.uid, { r: r3(selFrame.r + Math.PI / 2) })}>↻ 90°</button>
+              <button className="btn" onClick={snapSelToWall}>إلصاق بالجدار</button>
+            </div>
+            <div className="row">
+              <button className="btn" onClick={duplicateSel}>نسخ</button>
+              <button className="btn danger" onClick={deleteSel}>حذف الإطار</button>
+            </div>
+          </section>
+        ) : (
+          <section>
+            <p className="hint">اضغط على أي إطار في الصالة (أو رقمه من القائمة) لتعديله. اسحب الإطار بالزر الأيسر لنقله على الجدران.</p>
+          </section>
+        )}
+
+        <section>
+          <label className="check"><input type="checkbox" checked={snap} onChange={(e) => setSnap(e.target.checked)} /> محاذاة للشبكة عند السحب (٢٥ سم)</label>
+          <button className="btn wide ghost" onClick={resetDefault}>استعادة التخطيط الافتراضي</button>
+        </section>
+      </aside>
+
+      <main className="stage">
+        <div ref={hostRef} className="canvasHost" />
+
+        <div className="topbar">
+          <button className={'btn save' + (dirty ? ' pulse' : '')} onClick={save} disabled={saving}>
+            {saving ? 'جاري الحفظ…' : dirty ? 'حفظ التخطيط ●' : 'حفظ التخطيط'}
+          </button>
+          <button className="btn" onClick={undo} title="Ctrl+Z">↶ تراجع</button>
+          <button className="btn" onClick={redo} title="Ctrl+Shift+Z">↷ إعادة</button>
+          <span className="spacer" />
+          <a className="btn ghost" href="/" target="_blank" rel="noreferrer">عرض المعرض ↗</a>
+          <a className="btn ghost" href="/admin/dashboard">← لوحة الإدارة</a>
+          <button className="btn ghost" onClick={handleLogout}>خروج</button>
+        </div>
+
+        <div className="hud">سرعة الطيران: <b>{speed}</b> م/ث · عجلة الماوس لتغييرها</div>
+
+        {help ? (
+          <div className="help">
+            <button className="x" onClick={() => setHelp(false)} aria-label="إغلاق">×</button>
+            <h4>وضع الطيران</h4>
+            <ul>
+              <li><kbd>W A S D</kbd> تحرّك · <kbd>E</kbd>/<kbd>Space</kbd> أعلى · <kbd>Q</kbd>/<kbd>C</kbd> أسفل</li>
+              <li><kbd>Shift</kbd> سرعة ×3 · عجلة الماوس: ضبط السرعة</li>
+              <li>اضغط <b>الزر الأيمن</b> واسحب: لتدوير الرؤية</li>
+              <li><b>الزر الأيسر</b>: حدّد إطاراً، واسحبه لنقله على الجدار (يلتصق ويدور تلقائياً)</li>
+              <li>الأسهم: تحريك الإطار المحدد (<kbd>Shift</kbd> خطوة أكبر) · <kbd>[</kbd> <kbd>]</kbd> الحجم · <kbd>Del</kbd> حذف</li>
+              <li><kbd>Ctrl+S</kbd> حفظ · <kbd>Ctrl+Z</kbd> تراجع</li>
+            </ul>
+          </div>
+        ) : (
+          <button className="helpBtn" onClick={() => setHelp(true)}>؟ المساعدة</button>
+        )}
+
+        {toast && <div className={'toast ' + toast.kind}>{toast.msg}</div>}
+      </main>
+    </div>
+  );
+}
+
+const CSS = `
+  .ed, .ed-loading { --gold:#c9a35b; --gold2:#f0cf8a; --bg:#0e0c0a; --panel:#15120f; --line:rgba(255,255,255,.09); --txt:#f3efe8; --mut:#9a9388; }
+  html, body { margin:0; background:#0e0c0a; }
+  .ed-loading { min-height:100vh; display:flex; align-items:center; justify-content:center; color:#c9a35b; background:#0e0c0a; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
+  .ed { display:flex; height:100vh; background:var(--bg); color:var(--txt); font-family:'Segoe UI',Tahoma,Arial,sans-serif; overflow:hidden; }
+  .panel { width:350px; flex-shrink:0; background:var(--panel); border-left:1px solid var(--line); overflow-y:auto; padding:18px 16px 28px; box-sizing:border-box; }
+  .brand { display:flex; gap:12px; align-items:center; margin-bottom:16px; }
+  .logo { width:40px; height:40px; border-radius:10px; background:linear-gradient(135deg,#c9a35b,#8f6d2f); color:#1a1408; display:flex; align-items:center; justify-content:center; font-size:20px; }
+  .brand h1 { margin:0; font-size:17px; font-weight:600; }
+  .brand p { margin:2px 0 0; font-size:11.5px; color:var(--mut); }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
+  .stats div { background:rgba(255,255,255,.04); border:1px solid var(--line); border-radius:10px; padding:9px 6px; text-align:center; }
+  .stats b { display:block; font-size:19px; color:var(--gold2); }
+  .stats span { font-size:11px; color:var(--mut); }
+  .note { font-size:12px; color:var(--mut); background:rgba(255,255,255,.04); border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:10px; line-height:1.6; }
+  .note.warn { color:#f0c987; border-color:rgba(240,201,135,.3); background:rgba(240,201,135,.07); }
+  section { border-top:1px solid var(--line); padding:14px 0 4px; margin-top:6px; }
+  h3 { margin:0 0 10px; font-size:13.5px; font-weight:600; color:#e4d9c3; display:flex; align-items:center; gap:8px; }
+  h3 small { color:var(--mut); font-weight:400; font-size:11px; }
+  .selnum { background:var(--gold); color:#1a1408; border-radius:20px; padding:1px 10px; font-size:13px; }
+  .chips { display:grid; grid-template-columns:repeat(auto-fill,minmax(38px,1fr)); gap:6px; }
+  .chip { height:34px; border-radius:8px; border:1px dashed rgba(255,255,255,.22); background:transparent; color:var(--mut); cursor:pointer; font-size:12.5px; font-weight:600; }
+  .chip.full { border-style:solid; border-color:rgba(201,163,91,.55); color:var(--gold2); background:rgba(201,163,91,.1); }
+  .chip.on { background:var(--gold); color:#1a1408; border-color:var(--gold); }
+  .chip:hover { filter:brightness(1.25); }
+  .legend { margin-top:9px; font-size:11px; color:var(--mut); display:flex; align-items:center; gap:6px; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:3px; border:1px dashed rgba(255,255,255,.35); margin-inline-start:8px; }
+  .dot.full { border:1px solid rgba(201,163,91,.7); background:rgba(201,163,91,.25); margin-inline-start:0; }
+  .hint { font-size:12px; color:var(--mut); line-height:1.7; margin:8px 0 0; }
+  .btn { background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.15); color:var(--txt); padding:8px 13px; border-radius:8px; cursor:pointer; font-size:12.5px; text-decoration:none; font-family:inherit; white-space:nowrap; }
+  .btn:hover { background:rgba(255,255,255,.13); }
+  .btn.wide { width:100%; box-sizing:border-box; }
+  .btn.ghost { background:rgba(0,0,0,.35); }
+  .btn.danger { color:#f0a0a0; border-color:rgba(224,100,100,.45); background:rgba(224,100,100,.12); }
+  .btn.save { background:linear-gradient(135deg,#c9a35b,#9c7a3c); color:#1a1408; border:none; font-weight:700; }
+  .btn.pulse { box-shadow:0 0 0 0 rgba(201,163,91,.7); animation:pulse 1.8s infinite; }
+  @keyframes pulse { 70% { box-shadow:0 0 0 10px rgba(201,163,91,0); } 100% { box-shadow:0 0 0 0 rgba(201,163,91,0); } }
+  .row { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .row .btn { flex:1; text-align:center; }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px; }
+  .grid2 { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:10px; }
+  .nf { display:block; margin-top:10px; }
+  .nf > span { display:block; font-size:11.5px; color:var(--mut); margin-bottom:5px; }
+  .nfbox { position:relative; }
+  .nfbox em { position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--mut); font-style:normal; font-size:12px; }
+  .nf input, .nf select { width:100%; box-sizing:border-box; padding:8px 10px; background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.15); color:var(--txt); border-radius:8px; font-size:13px; outline:none; font-family:inherit; }
+  .nf input:focus, .nf select:focus { border-color:var(--gold); }
+  .err { color:#f0a0a0; font-size:11.5px; display:block; margin-top:4px; }
+  .range { width:100%; margin-top:10px; accent-color:var(--gold); }
+  .check { display:flex; gap:8px; align-items:center; font-size:12.5px; color:#d8cdb8; margin-bottom:10px; cursor:pointer; }
+  .stage { position:relative; flex:1; min-width:0; }
+  .canvasHost { position:absolute; inset:0; }
+  .topbar { position:absolute; top:12px; left:12px; right:12px; display:flex; gap:8px; align-items:center; pointer-events:none; flex-wrap:wrap; }
+  .topbar > * { pointer-events:auto; }
+  .topbar .spacer { flex:1; }
+  .hud { position:absolute; bottom:12px; right:12px; background:rgba(0,0,0,.55); border:1px solid var(--line); border-radius:8px; padding:6px 12px; font-size:12px; color:#d8cdb8; pointer-events:none; }
+  .help { position:absolute; bottom:12px; left:12px; width:360px; max-width:calc(100% - 24px); background:rgba(14,12,10,.88); border:1px solid var(--line); border-radius:12px; padding:12px 16px 12px; backdrop-filter:blur(6px); }
+  .help h4 { margin:0 0 8px; font-size:13px; color:var(--gold2); }
+  .help ul { margin:0; padding:0 16px 0 0; font-size:12px; line-height:1.95; color:#d8cdb8; }
+  .help .x { position:absolute; top:6px; left:10px; background:none; border:none; color:var(--mut); font-size:20px; cursor:pointer; }
+  .helpBtn { position:absolute; bottom:12px; left:12px; background:rgba(0,0,0,.55); border:1px solid var(--line); color:#d8cdb8; border-radius:8px; padding:7px 12px; font-size:12px; cursor:pointer; }
+  kbd { background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.2); border-radius:4px; padding:0 6px; font-family:inherit; font-size:11px; }
+  .toast { position:absolute; top:64px; left:50%; transform:translateX(-50%); background:#1f3d27; border:1px solid #3d7a4d; color:#d6f2dc; padding:10px 18px; border-radius:10px; font-size:13px; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+  .toast.err { background:#451f1f; border-color:#8a3d3d; color:#f6d6d6; }
+  .toast.warn { background:#453a1f; border-color:#8a7a3d; color:#f6ecd6; }
+  @media (max-width: 860px) {
+    .ed { flex-direction:column-reverse; }
+    .panel { width:100%; height:42vh; border-left:none; border-top:1px solid var(--line); }
+    .help { display:none; }
+  }
+`;
