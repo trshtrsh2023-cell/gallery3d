@@ -7,11 +7,11 @@ import {
 } from '../../lib/galleryLayout';
 
 // ============================================================================
-// محرر صالة المعرض للإداريين — وضع الطيران الحر + تحريك/تدوير/تحجيم/ترقيم الإطارات
+// محرر صالة المعرض للإداريين — وضع الطيران الحر + تحريك/تدوير/تحجيم الإطارات والجدران
 // ============================================================================
 
 let uidCounter = 1;
-const newUid = () => 'f' + (uidCounter++);
+const newUid = (prefix = 'f') => prefix + (uidCounter++);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const RAD2DEG = 180 / Math.PI;
@@ -50,15 +50,41 @@ function createEngine(THREE, host, cb) {
   scene.add(grid);
 
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xe3ddd3, roughness: 0.85 });
-  const walls = [];
-  ROOM_WALLS.forEach((w) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w[0], w[1], w[2]), wallMat);
-    m.position.set(w[3], w[4], w[5]);
-    scene.add(m);
-    walls.push(m);
-  });
+  const wallNodes = new Map();
 
-  // ---- خامات الصور (نسخ مصغّرة مخزّنة مؤقتاً حسب الرابط) ----
+  function createWallMesh(uid) {
+    const group = new THREE.Group();
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), wallMat.clone());
+    mesh.userData.wallUid = uid;
+    const outline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1.002, 1.002, 1.002)),
+      new THREE.LineBasicMaterial({ color: 0xffc94d })
+    );
+    group.add(mesh, outline);
+    outline.visible = false;
+    return { uid, group, mesh, outline };
+  }
+
+  function syncWalls(list, selectedWallUid) {
+    const alive = new Set();
+    list.forEach((w) => {
+      alive.add(w.uid);
+      let nd = wallNodes.get(w.uid);
+      if (!nd) { nd = createWallMesh(w.uid); wallNodes.set(w.uid, nd); scene.add(nd.group); }
+      nd.group.position.set(w.x, w.y, w.z);
+      nd.group.rotation.y = w.r || 0;
+      nd.mesh.scale.set(w.width, w.height, w.depth);
+      nd.outline.scale.set(w.width, w.height, w.depth);
+      nd.outline.visible = (w.uid === selectedWallUid);
+    });
+    wallNodes.forEach((nd, uid) => {
+      if (alive.has(uid)) return;
+      scene.remove(nd.group);
+      wallNodes.delete(uid);
+    });
+  }
+
+  // ---- خامات الصور ----
   const loader = new THREE.TextureLoader();
   const texCache = new Map();
   function loadPhoto(url, done) {
@@ -203,7 +229,12 @@ function createEngine(THREE, host, cb) {
     nodes.forEach((nd) => out.push(nd.frame, nd.img));
     return out;
   }
-  // يحوّل نقطة اصطدام بجدار إلى موضع/دوران إطار ملاصق للسطح (أو null للأسطح الأفقية)
+  function wallMeshList() {
+    const out = [];
+    wallNodes.forEach((nd) => out.push(nd.mesh));
+    return out;
+  }
+
   function placementFromHit(h) {
     const n = h.face.normal.clone().transformDirection(h.object.matrixWorld);
     if (Math.abs(n.y) > 0.5) return null;
@@ -211,7 +242,9 @@ function createEngine(THREE, host, cb) {
     return { x: h.point.x, y: h.point.y, z: h.point.z, r: Math.atan2(n.x, n.z), axis };
   }
   function wallPlacement(rayObj) {
-    const hits = rayObj.intersectObjects(walls, false);
+    const meshes = wallMeshList();
+    if (!meshes.length) return null;
+    const hits = rayObj.intersectObjects(meshes, false);
     for (const h of hits) {
       const p = placementFromHit(h);
       if (p) return p;
@@ -220,7 +253,7 @@ function createEngine(THREE, host, cb) {
   }
 
   let looking = false;
-  let dragging = null;
+  let dragging = null; // { type: 'frame'|'wall', uid, ... }
   let lastX = 0;
   let lastY = 0;
   const keys = new Set();
@@ -234,13 +267,19 @@ function createEngine(THREE, host, cb) {
       return;
     }
     if (e.button === 0) {
-      const hits = castFromEvent(e).intersectObjects([...framePickables(), ...walls], false);
+      const fMeshes = framePickables();
+      const wMeshes = wallMeshList();
+      const hits = castFromEvent(e).intersectObjects([...fMeshes, ...wMeshes], false);
       const h = hits[0];
       if (h && h.object.userData.uid) {
-        cb.select(h.object.userData.uid);
-        dragging = { uid: h.object.userData.uid, started: false, sx: e.clientX, sy: e.clientY };
+        cb.selectFrame(h.object.userData.uid);
+        dragging = { type: 'frame', uid: h.object.userData.uid, started: false, sx: e.clientX, sy: e.clientY };
+      } else if (h && h.object.userData.wallUid) {
+        cb.selectWall(h.object.userData.wallUid);
+        dragging = { type: 'wall', uid: h.object.userData.wallUid, started: false, sx: e.clientX, sy: e.clientY };
       } else {
-        cb.select(null);
+        cb.selectFrame(null);
+        cb.selectWall(null);
       }
     }
   }
@@ -258,15 +297,32 @@ function createEngine(THREE, host, cb) {
         dragging.started = true;
         cb.beginGesture();
       }
-      const p = wallPlacement(castFromEvent(e));
-      if (!p) return;
-      const step = cb.snapStep();
-      let { x, y, z } = p;
-      if (step) {
-        y = Math.round(y / step) * step;
-        if (p.axis === 'x') z = Math.round(z / step) * step; else x = Math.round(x / step) * step;
+      if (dragging.type === 'frame') {
+        const p = wallPlacement(castFromEvent(e));
+        if (!p) return;
+        const step = cb.snapStep();
+        let { x, y, z } = p;
+        if (step) {
+          y = Math.round(y / step) * step;
+          if (p.axis === 'x') z = Math.round(z / step) * step; else x = Math.round(x / step) * step;
+        }
+        cb.moveFrame(dragging.uid, { x: r3(x), y: r3(clamp(y, FRAME_LIMITS.Y_MIN, FRAME_LIMITS.Y_MAX)), z: r3(z), r: r3(p.r) });
+      } else if (dragging.type === 'wall') {
+        // سحب ونقل الجدار أفقياً عبر تقاطع شعاعي مع مستوى أفق الصالة
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        const targetPos = new THREE.Vector3();
+        castFromEvent(e).ray.intersectPlane(plane, targetPos);
+        if (targetPos) {
+          const step = cb.snapStep();
+          let nx = targetPos.x;
+          let nz = targetPos.z;
+          if (step) {
+            nx = Math.round(nx / step) * step;
+            nz = Math.round(nz / step) * step;
+          }
+          cb.moveWall(dragging.uid, { x: r3(nx), z: r3(nz) });
+        }
       }
-      cb.move(dragging.uid, { x: r3(x), y: r3(clamp(y, FRAME_LIMITS.Y_MIN, FRAME_LIMITS.Y_MAX)), z: r3(z), r: r3(p.r) });
     }
   }
   function onUp(e) {
@@ -309,7 +365,6 @@ function createEngine(THREE, host, cb) {
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null;
   if (ro) ro.observe(host);
 
-  // ---- حلقة الرسم + الطيران ----
   const clock = new THREE.Clock();
   let raf = 0;
   const fwd = new THREE.Vector3();
@@ -337,9 +392,9 @@ function createEngine(THREE, host, cb) {
   }
   animate();
 
-  // ---- واجهة يستدعيها React ----
   return {
     sync,
+    syncWalls,
     setSpeed(v) { speed = v; },
     focusFrame(f) {
       const d = 3.4 * Math.max(1, f.s);
@@ -347,24 +402,37 @@ function createEngine(THREE, host, cb) {
       yaw = f.r;
       pitch = 0;
     },
-    // موضع إطار جديد: حيث تُصيب نظرة الكاميرا جداراً، وإلا أمام الكاميرا مباشرة
+    focusWall(w) {
+      const d = 5.0;
+      const nx = Math.sin(w.r || 0);
+      const nz = Math.cos(w.r || 0);
+      camera.position.set(w.x + nx * d, w.y + 0.5, w.z + nz * d);
+      yaw = (w.r || 0) + Math.PI;
+      pitch = 0;
+    },
     frontPlacement() {
-      ray.set(camera.position.clone(), fwd.clone().normalize());
-      const p = wallPlacement(ray);
-      if (p) return { x: r3(p.x), y: r3(clamp(p.y, FRAME_LIMITS.Y_MIN, FRAME_LIMITS.Y_MAX)), z: r3(p.z), r: r3(p.r) };
+      const meshes = wallMeshList();
+      if (meshes.length > 0) {
+        ray.set(camera.position.clone(), fwd.clone().normalize());
+        const hits = ray.intersectObjects(meshes, false);
+        for (const h of hits) {
+          const p = placementFromHit(h);
+          if (p) return { x: r3(p.x), y: r3(clamp(p.y, FRAME_LIMITS.Y_MIN, FRAME_LIMITS.Y_MAX)), z: r3(p.z), r: r3(p.r) };
+        }
+      }
       const hx = -Math.sin(yaw);
       const hz = -Math.cos(yaw);
       return { x: r3(camera.position.x + hx * 4), y: 1.6, z: r3(camera.position.z + hz * 4), r: r3(yaw) };
     },
-    // يلصق الإطار بأقرب جدار (يُجرَّب الاتجاهات الأربعة من أمام الإطار)
     snapToWall(f) {
       const nx = Math.sin(f.r);
       const nz = Math.cos(f.r);
       const origin = new THREE.Vector3(f.x + nx * 0.3, f.y, f.z + nz * 0.3);
       let best = null;
+      const meshes = wallMeshList();
       [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
         ray.set(origin, new THREE.Vector3(dx, 0, dz));
-        const hits = ray.intersectObjects(walls, false);
+        const hits = ray.intersectObjects(meshes, false);
         for (const h of hits) {
           const p = placementFromHit(h);
           if (p) { if (!best || h.distance < best.d) best = { d: h.distance, p }; break; }
@@ -391,13 +459,13 @@ function createEngine(THREE, host, cb) {
 }
 
 // ---------------------------------------------------------------------------
-// حقل رقمي بمسودة نصية (يسمح بكتابة "-" و"." أثناء الإدخال) + أسهم ↑↓
+// حقل رقمي بمسودة نصية
 // ---------------------------------------------------------------------------
 function NumField({ label, value, onChange, step = 0.05, digits = 2, suffix }) {
   const fmt = (v) => String(Math.round(v * 10 ** digits) / 10 ** digits);
   const [txt, setTxt] = useState(fmt(value));
   const [focus, setFocus] = useState(false);
-  useEffect(() => { if (!focus) setTxt(fmt(value)); }, [value, focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!focus) setTxt(fmt(value)); }, [value, focus]);
   return (
     <label className="nf">
       <span>{label}</span>
@@ -425,7 +493,7 @@ function NumField({ label, value, onChange, step = 0.05, digits = 2, suffix }) {
 }
 
 // ---------------------------------------------------------------------------
-// الصفحة
+// الصفحة الرئيسية للمحرر
 // ---------------------------------------------------------------------------
 export default function GalleryEditor() {
   const router = useRouter();
@@ -436,9 +504,11 @@ export default function GalleryEditor() {
   const [threeReady, setThreeReady] = useState(false);
   const [engineReady, setEngineReady] = useState(false);
   const [frames, setFrames] = useState([]);
+  const [walls, setWalls] = useState([]);
   const [photos, setPhotos] = useState([]);
   const [photoOf, setPhotoOf] = useState({});
-  const [sel, setSel] = useState(null);
+  const [sel, setSel] = useState(null);       // uid الإطار المحدد
+  const [selWall, setSelWall] = useState(null); // uid الجدار المحدد
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
@@ -452,10 +522,11 @@ export default function GalleryEditor() {
   const redoRef = useRef([]);
   const lastUndo = useRef({ key: null, t: 0 });
   const live = useRef({});
-  live.current = { frames, photoOf, sel, snap, photos };
+  live.current = { frames, walls, photoOf, sel, selWall, snap, photos };
   const cbRef = useRef({});
 
   const selFrame = frames.find((f) => f.uid === sel) || null;
+  const selWallObj = walls.find((w) => w.uid === selWall) || null;
   const photoById = {};
   photos.forEach((p) => { photoById[String(p.id)] = p; });
   const placedIds = new Set(Object.values(photoOf));
@@ -468,7 +539,7 @@ export default function GalleryEditor() {
     showToast._t = setTimeout(() => setToast(null), 3200);
   }, []);
 
-  // ---- تحميل البيانات + التحقق من الجلسة ----
+  // ---- تحميل البيانات ----
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -479,21 +550,33 @@ export default function GalleryEditor() {
         fetch('/api/admin/photos').then((r) => (r.ok ? r.json() : [])).catch(() => [])
       ]);
       if (cancelled) return;
-      const base = normalizeFrames(lay && lay.frames);
-      const list = (base.length ? base : DEFAULT_FRAMES).map((f) => ({ ...f, uid: newUid() }));
+      
+      const baseFrames = normalizeFrames(lay && lay.frames);
+      const listFrames = (baseFrames.length ? baseFrames : DEFAULT_FRAMES).map((f) => ({ ...f, uid: newUid('f') }));
+      
+      // تهيئة الجدران من التخطيط المحفوظ أو الافتراضية ROOM_WALLS[cite: 1]
+      const baseWalls = (lay && lay.walls) ? lay.walls : ROOM_WALLS.map((w, i) => ({
+        uid: 'w' + (i + 1),
+        width: w[0], height: w[1], depth: w[2],
+        x: w[3], y: w[4], z: w[5],
+        r: w[6] || 0
+      }));
+      const listWalls = baseWalls.map((w) => ({ ...w, uid: w.uid || newUid('w') }));
+
       const phArr = Array.isArray(ph) ? ph : [];
-      const { byFrame } = assignPhotosToFrames(phArr, list, (p) => p.slot_index);
+      const { byFrame } = assignPhotosToFrames(phArr, listFrames, (p) => p.slot_index);
       const po = {};
-      list.forEach((f) => { const p = byFrame.get(f.n); if (p) po[f.uid] = String(p.id); });
-      setFrames(list);
+      listFrames.forEach((f) => { const p = byFrame.get(f.n); if (p) po[f.uid] = String(p.id); });
+
+      setFrames(listFrames);
+      setWalls(listWalls);
       setPhotos(phArr);
       setPhotoOf(po);
       setIsDefault(!!(lay && lay.isDefault));
       setLoading(false);
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [router]);
 
   // ---- تحميل Three.js ----
   useEffect(() => {
@@ -509,9 +592,11 @@ export default function GalleryEditor() {
   useEffect(() => {
     if (!threeReady || loading || !hostRef.current) return undefined;
     const eng = createEngine(window.THREE, hostRef.current, {
-      select: (uid) => cbRef.current.select(uid),
+      selectFrame: (uid) => { setSel(uid); if (uid) setSelWall(null); },
+      selectWall: (uid) => { setSelWall(uid); if (uid) setSel(null); },
       beginGesture: () => cbRef.current.beginGesture(),
-      move: (uid, p) => cbRef.current.move(uid, p),
+      moveFrame: (uid, p) => cbRef.current.moveFrame(uid, p),
+      moveWall: (uid, p) => cbRef.current.moveWall(uid, p),
       speed: (v) => setSpeed(Math.round(v * 10) / 10),
       snapStep: () => (live.current.snap ? 0.25 : 0)
     });
@@ -520,19 +605,18 @@ export default function GalleryEditor() {
     return () => { eng.dispose(); engineRef.current = null; setEngineReady(false); };
   }, [threeReady, loading]);
 
-  // ---- مزامنة الحالة -> المشهد ----
+  // ---- مزامنة الحالة مع المشهد ----
   useEffect(() => {
     if (!engineReady || !engineRef.current) return;
     engineRef.current.sync(
       frames.map((f) => ({ ...f, photoUrl: photoOf[f.uid] && photoById[photoOf[f.uid]] ? photoById[photoOf[f.uid]].image_url : null })),
       sel
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engineReady, frames, photoOf, photos, sel]);
+    engineRef.current.syncWalls(walls, selWall);
+  }, [engineReady, frames, walls, photoOf, photos, sel, selWall]);
 
-  useEffect(() => { setNDraft(selFrame ? String(selFrame.n) : ''); }, [sel, selFrame && selFrame.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setNDraft(selFrame ? String(selFrame.n) : ''); }, [sel, selFrame]);
 
-  // ---- تحذير قبل المغادرة مع تعديلات غير محفوظة ----
   useEffect(() => {
     const h = (e) => { if (live.current.dirty) { e.preventDefault(); e.returnValue = ''; } };
     window.addEventListener('beforeunload', h);
@@ -540,8 +624,8 @@ export default function GalleryEditor() {
   }, []);
   live.current.dirty = dirty;
 
-  // ---- التراجع/الإعادة ----
-  const snapshot = () => JSON.stringify({ frames: live.current.frames, photoOf: live.current.photoOf });
+  // ---- التراجع / الإعادة ----
+  const snapshot = () => JSON.stringify({ frames: live.current.frames, walls: live.current.walls, photoOf: live.current.photoOf });
   const pushUndo = useCallback((key) => {
     const now = Date.now();
     if (key && lastUndo.current.key === key && now - lastUndo.current.t < 900) { lastUndo.current.t = now; return; }
@@ -553,9 +637,11 @@ export default function GalleryEditor() {
   const applySnapshot = (str) => {
     const o = JSON.parse(str);
     setFrames(o.frames);
+    setWalls(o.walls || []);
     setPhotoOf(o.photoOf);
     setDirty(true);
     if (live.current.sel && !o.frames.some((f) => f.uid === live.current.sel)) setSel(null);
+    if (live.current.selWall && !(o.walls || []).some((w) => w.uid === live.current.selWall)) setSelWall(null);
   };
   const undo = () => {
     const s = undoRef.current.pop();
@@ -571,24 +657,54 @@ export default function GalleryEditor() {
     applySnapshot(s);
   };
 
-  // ---- العمليات على الإطارات ----
+  // ---- عمليات الإطارات والجدران ----
   const updateFrame = (uid, patch, key) => {
     pushUndo(key || ('u:' + uid + ':' + Object.keys(patch).join(',')));
     setFrames((fs) => fs.map((f) => (f.uid === uid ? { ...f, ...patch } : f)));
     setDirty(true);
   };
+
+  const updateWall = (uid, patch, key) => {
+    pushUndo(key || ('w:' + uid + ':' + Object.keys(patch).join(',')));
+    setWalls((ws) => ws.map((w) => (w.uid === uid ? { ...w, ...patch } : w)));
+    setDirty(true);
+  };
+
+  const addWall = () => {
+    if (walls.length >= 20) { showToast('وصلت للحد الأقصى من الجدران', 'warn'); return; }
+    pushUndo();
+    const newW = { uid: newUid('w'), width: 6, height: 3.5, depth: 0.3, x: 0, y: 1.75, z: 0, r: 0 };
+    setWalls((ws) => [...ws, newW]);
+    setSelWall(newW.uid);
+    setSel(null);
+    setDirty(true);
+    showToast('تمت إضافة جدار جديد');
+  };
+
+  const deleteSelWall = () => {
+    if (!selWallObj) return;
+    if (!window.confirm('حذف هذا الجدار نهائياً؟')) return;
+    pushUndo();
+    setWalls((ws) => ws.filter((w) => w.uid !== selWallObj.uid));
+    setSelWall(null);
+    setDirty(true);
+    showToast('تم حذف الجدار');
+  };
+
   const nextFreeN = () => {
     const used = new Set(live.current.frames.map((f) => f.n));
     let n = 1;
     while (used.has(n)) n++;
     return n;
   };
+  
   const addFrame = (place, extra) => {
     if (live.current.frames.length >= FRAME_LIMITS.MAX_FRAMES) { showToast('وصلت للحد الأقصى من الإطارات (' + FRAME_LIMITS.MAX_FRAMES + ')', 'warn'); return; }
     pushUndo();
-    const f = { uid: newUid(), n: nextFreeN(), x: 0, y: 1.6, z: 0, r: 0, s: 1, ...place, ...(extra || {}) };
+    const f = { uid: newUid('f'), n: nextFreeN(), x: 0, y: 1.6, z: 0, r: 0, s: 1, ...place, ...(extra || {}) };
     setFrames((fs) => [...fs, f].sort((a, b) => a.n - b.n));
     setSel(f.uid);
+    setSelWall(null);
     setDirty(true);
     showToast('أُضيف الإطار رقم ' + f.n);
   };
@@ -632,7 +748,13 @@ export default function GalleryEditor() {
   };
   const focusFrame = (f) => {
     setSel(f.uid);
+    setSelWall(null);
     if (engineRef.current) engineRef.current.focusFrame(f);
+  };
+  const focusWall = (w) => {
+    setSelWall(w.uid);
+    setSel(null);
+    if (engineRef.current) engineRef.current.focusWall(w);
   };
   const applyN = (txt) => {
     setNDraft(txt);
@@ -658,6 +780,8 @@ export default function GalleryEditor() {
     setSaving(true);
     try {
       const payloadFrames = frames.map((f) => ({ n: f.n, x: r3(f.x), y: r3(f.y), z: r3(f.z), r: r3(f.r), s: r3(f.s) }));
+      const payloadWalls = walls.map((w) => ({ uid: w.uid, width: r3(w.width), height: r3(w.height), depth: r3(w.depth), x: r3(w.x), y: r3(w.y), z: r3(w.z), r: r3(w.r || 0) }));
+      
       const uidByPhoto = {};
       Object.keys(photoOf).forEach((uid) => { uidByPhoto[photoOf[uid]] = uid; });
       const photoSlots = {};
@@ -669,13 +793,13 @@ export default function GalleryEditor() {
       const res = await fetch('/api/layout', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ frames: payloadFrames, photoSlots })
+        body: JSON.stringify({ frames: payloadFrames, walls: payloadWalls, photoSlots })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showToast(data.error || 'فشل الحفظ', 'err'); setSaving(false); return; }
       setDirty(false);
       setIsDefault(false);
-      showToast('تم حفظ التخطيط — سيراه الزوار فوراً');
+      showToast('تم حفظ التخطيط والجدران بنجاح');
     } catch (e) {
       showToast('تعذّر الاتصال بالخادم', 'err');
     }
@@ -683,23 +807,28 @@ export default function GalleryEditor() {
   };
 
   const resetDefault = () => {
-    if (!window.confirm('استعادة التخطيط الافتراضي (٢٥ إطاراً)؟ لن يُحفظ إلا بعد ضغط "حفظ".')) return;
+    if (!window.confirm('استعادة التخطيط الافتراضي؟ لن يُحفظ إلا بعد ضغط "حفظ".')) return;
     pushUndo();
-    const list = DEFAULT_FRAMES.map((f) => ({ ...f, uid: newUid() }));
-    const { byFrame } = assignPhotosToFrames(photos, list, (p) => p.slot_index);
+    const listFrames = DEFAULT_FRAMES.map((f) => ({ ...f, uid: newUid('f') }));
+    const listWalls = ROOM_WALLS.map((w, i) => ({
+      uid: 'w' + (i + 1), width: w[0], height: w[1], depth: w[2], x: w[3], y: w[4], z: w[5], r: w[6] || 0
+    }));
+    const { byFrame } = assignPhotosToFrames(photos, listFrames, (p) => p.slot_index);
     const po = {};
-    list.forEach((f) => { const p = byFrame.get(f.n); if (p) po[f.uid] = String(p.id); });
-    setFrames(list);
+    listFrames.forEach((f) => { const p = byFrame.get(f.n); if (p) po[f.uid] = String(p.id); });
+    setFrames(listFrames);
+    setWalls(listWalls);
     setPhotoOf(po);
     setSel(null);
+    setSelWall(null);
     setDirty(true);
   };
 
-  // ---- ربط ردود المحرك بآخر حالة React ----
+  // ---- ربط ردود المحرك ----
   cbRef.current = {
-    select: (uid) => setSel(uid),
     beginGesture: () => pushUndo(),
-    move: (uid, p) => { setFrames((fs) => fs.map((f) => (f.uid === uid ? { ...f, ...p } : f))); setDirty(true); }
+    moveFrame: (uid, p) => { setFrames((fs) => fs.map((f) => (f.uid === uid ? { ...f, ...p } : f))); setDirty(true); },
+    moveWall: (uid, p) => { setWalls((ws) => ws.map((w) => (w.uid === uid ? { ...w, ...p } : w))); setDirty(true); }
   };
 
   // ---- اختصارات لوحة المفاتيح ----
@@ -710,29 +839,32 @@ export default function GalleryEditor() {
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') { e.preventDefault(); redo(); return; }
       if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
-      const f = live.current.frames.find((x) => x.uid === live.current.sel);
-      if (!f) return;
-      const stepMove = e.shiftKey ? 0.25 : 0.05;
-      if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
-        e.preventDefault();
-        const d = (e.code === 'ArrowRight' ? 1 : -1) * stepMove;
-        updateFrame(f.uid, { x: r3(f.x + Math.cos(f.r) * d), z: r3(f.z - Math.sin(f.r) * d) }, 'nudge');
-      } else if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
-        e.preventDefault();
-        const d = (e.code === 'ArrowUp' ? 1 : -1) * stepMove;
-        updateFrame(f.uid, { y: r3(clamp(f.y + d, FRAME_LIMITS.Y_MIN, FRAME_LIMITS.Y_MAX)) }, 'nudge');
-      } else if (e.code === 'BracketRight' || e.code === 'BracketLeft') {
-        const d = e.code === 'BracketRight' ? 0.05 : -0.05;
-        updateFrame(f.uid, { s: r3(clamp(f.s + d, FRAME_LIMITS.S_MIN, FRAME_LIMITS.S_MAX)) }, 'scale');
-      } else if (e.code === 'Delete') {
-        deleteSel();
-      } else if (e.code === 'Escape') {
-        setSel(null);
+      
+      if (selFrame) {
+        const stepMove = e.shiftKey ? 0.25 : 0.05;
+        if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+          e.preventDefault();
+          const d = (e.code === 'ArrowRight' ? 1 : -1) * stepMove;
+          updateFrame(selFrame.uid, { x: r3(selFrame.x + Math.cos(selFrame.r) * d), z: r3(selFrame.z - Math.sin(selFrame.r) * d) }, 'nudge');
+        } else if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+          e.preventDefault();
+          const d = (e.code === 'ArrowUp' ? 1 : -1) * stepMove;
+          updateFrame(selFrame.uid, { y: r3(clamp(selFrame.y + d, FRAME_LIMITS.Y_MIN, FRAME_LIMITS.Y_MAX)) }, 'nudge');
+        } else if (e.code === 'Delete') {
+          deleteSel();
+        } else if (e.code === 'Escape') {
+          setSel(null);
+        }
+      } else if (selWallObj) {
+        if (e.code === 'Delete') {
+          deleteSelWall();
+        } else if (e.code === 'Escape') {
+          setSelWall(null);
+        }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   });
 
   async function handleLogout() {
@@ -741,6 +873,7 @@ export default function GalleryEditor() {
   }
 
   const deg = selFrame ? ((selFrame.r * RAD2DEG) % 360 + 360) % 360 : 0;
+  const wallDeg = selWallObj ? (((selWallObj.r || 0) * RAD2DEG) % 360 + 360) % 360 : 0;
 
   if (loading) {
     return <div className="ed-loading" dir="rtl"><style dangerouslySetInnerHTML={{ __html: CSS }} />جاري تحميل المحرر…</div>;
@@ -749,7 +882,7 @@ export default function GalleryEditor() {
   return (
     <div className="ed" dir="rtl">
       <Head>
-        <title>محرر الصالة — لوحة الإدارة</title>
+        <title>محرر الصالة والجدران — لوحة الإدارة</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
@@ -759,22 +892,36 @@ export default function GalleryEditor() {
           <div className="logo">▣</div>
           <div>
             <h1>محرر الصالة</h1>
-            <p>الإطارات والمواقع ثلاثية الأبعاد</p>
+            <p>الإطارات والجدران ثلاثية الأبعاد</p>
           </div>
         </div>
 
         <div className="stats">
+          <div><b>{walls.length}</b><span>جدران</span></div>
           <div><b>{frames.length}</b><span>إطار</span></div>
           <div><b>{filled}</b><span>ممتلئ</span></div>
-          <div><b>{frames.length - filled}</b><span>فارغ</span></div>
         </div>
         {unplaced.length > 0 && (
-          <div className="note warn">{unplaced.length} صورة بلا إطار (لا يوجد إطار شاغر) — أضف إطارات أو بدّل صوراً.</div>
+          <div className="note warn">{unplaced.length} صورة بلا إطار — أضف إطارات أو بدّل صوراً.</div>
         )}
         {isDefault && <div className="note">التخطيط الحالي افتراضي ولم يُحفظ بعد في قاعدة البيانات.</div>}
 
+        {/* قسم الجدران */}
         <section>
-          <h3>الإطارات <small>(اضغط للانتقال إليه)</small></h3>
+          <h3>الجدران <small>(اضغط لتعديل الجدار)</small></h3>
+          <div className="chips">
+            {walls.map((w, idx) => (
+              <button key={w.uid} className={'chip' + (w.uid === selWall ? ' on' : '')} onClick={() => focusWall(w)} title={`جدار ${idx + 1}`}>
+                ج{idx + 1}
+              </button>
+            ))}
+          </div>
+          <button className="btn wide" style={{ marginTop: '10px' }} onClick={addWall}>+ إضافة جدار جديد</button>
+        </section>
+
+        {/* قسم الإطارات */}
+        <section>
+          <h3>الإطارات <small>(اضغط للانتقال)</small></h3>
           <div className="chips">
             {frames.map((f) => (
               <button key={f.uid} className={'chip' + (f.uid === sel ? ' on' : '') + (photoOf[f.uid] ? ' full' : '')} onClick={() => focusFrame(f)} title={photoOf[f.uid] ? 'ممتلئ' : 'فارغ'}>
@@ -788,9 +935,38 @@ export default function GalleryEditor() {
         <section>
           <h3>إضافة إطار</h3>
           <button className="btn wide" onClick={addAtCamera}>+ إطار جديد حيث أنظر</button>
-          <p className="hint">يُلصق تلقائياً على الجدار الذي تنظر إليه الكاميرا.</p>
         </section>
 
+        {/* لوحة تعديل الجدار المحدد */}
+        {selWallObj ? (
+          <section className="sel">
+            <h3>الجدار المحدد <span className="selnum">جدار</span></h3>
+
+            <div className="grid3">
+              <NumField label="موقع X" value={selWallObj.x} onChange={(v) => updateWall(selWallObj.uid, { x: r3(v) })} />
+              <NumField label="الارتفاع Y" value={selWallObj.y} onChange={(v) => updateWall(selWallObj.uid, { y: r3(v) })} />
+              <NumField label="موقع Z" value={selWallObj.z} onChange={(v) => updateWall(selWallObj.uid, { z: r3(v) })} />
+            </div>
+
+            <div className="grid3">
+              <NumField label="العرض" value={selWallObj.width} step={0.2} onChange={(v) => updateWall(selWallObj.uid, { width: r3(Math.max(0.5, v)) })} />
+              <NumField label="الارتفاع" value={selWallObj.height} step={0.2} onChange={(v) => updateWall(selWallObj.uid, { height: r3(Math.max(0.5, v)) })} />
+              <NumField label="السمك" value={selWallObj.depth} step={0.05} onChange={(v) => updateWall(selWallObj.uid, { depth: r3(Math.max(0.1, v)) })} />
+            </div>
+
+            <div className="grid2">
+              <NumField label="الدوران" suffix="°" digits={1} step={5} value={wallDeg} onChange={(v) => updateWall(selWallObj.uid, { r: r3((v * Math.PI) / 180) })} />
+            </div>
+
+            <div className="row">
+              <button className="btn" onClick={() => updateWall(selWallObj.uid, { r: r3((selWallObj.r || 0) - Math.PI / 2) })}>↺ 90°</button>
+              <button className="btn" onClick={() => updateWall(selWallObj.uid, { r: r3((selWallObj.r || 0) + Math.PI / 2) })}>↻ 90°</button>
+              <button className="btn danger" onClick={deleteSelWall}>حذف الجدار</button>
+            </div>
+          </section>
+        ) : null}
+
+        {/* لوحة تعديل الإطار المحدد */}
         {selFrame ? (
           <section className="sel">
             <h3>الإطار المحدد <span className="selnum">{selFrame.n}</span></h3>
@@ -843,11 +1019,11 @@ export default function GalleryEditor() {
               <button className="btn danger" onClick={deleteSel}>حذف الإطار</button>
             </div>
           </section>
-        ) : (
+        ) : !selWallObj ? (
           <section>
-            <p className="hint">اضغط على أي إطار في الصالة (أو رقمه من القائمة) لتعديله. اسحب الإطار بالزر الأيسر لنقله على الجدران.</p>
+            <p className="hint">اضغط على أي جدار أو إطار في الصالة لتحديده وتعديله أو سحبه مباشرة بالماوس.</p>
           </section>
-        )}
+        ) : null}
 
         <section>
           <label className="check"><input type="checkbox" checked={snap} onChange={(e) => setSnap(e.target.checked)} /> محاذاة للشبكة عند السحب (٢٥ سم)</label>
@@ -875,14 +1051,11 @@ export default function GalleryEditor() {
         {help ? (
           <div className="help">
             <button className="x" onClick={() => setHelp(false)} aria-label="إغلاق">×</button>
-            <h4>وضع الطيران</h4>
+            <h4>محرر الصالة والجدران</h4>
             <ul>
               <li><kbd>W A S D</kbd> تحرّك · <kbd>E</kbd>/<kbd>Space</kbd> أعلى · <kbd>Q</kbd>/<kbd>C</kbd> أسفل</li>
-              <li><kbd>Shift</kbd> سرعة ×3 · عجلة الماوس: ضبط السرعة</li>
-              <li>اضغط <b>الزر الأيمن</b> واسحب: لتدوير الرؤية</li>
-              <li><b>الزر الأيسر</b>: حدّد إطاراً، واسحبه لنقله على الجدار (يلتصق ويدور تلقائياً)</li>
-              <li>الأسهم: تحريك الإطار المحدد (<kbd>Shift</kbd> خطوة أكبر) · <kbd>[</kbd> <kbd>]</kbd> الحجم · <kbd>Del</kbd> حذف</li>
-              <li><kbd>Ctrl+S</kbd> حفظ · <kbd>Ctrl+Z</kbd> تراجع</li>
+              <li>انقر بالزر الأيسر على أي **جدار** أو **إطار** لتحديده وتحريكه أو تعديل أبعاده من القائمة الجانبية.</li>
+              <li><kbd>Ctrl+S</kbd> للحفظ · <kbd>Ctrl+Z</kbd> للتراجع.</li>
             </ul>
           </div>
         ) : (
@@ -955,7 +1128,7 @@ const CSS = `
   .help h4 { margin:0 0 8px; font-size:13px; color:var(--gold2); }
   .help ul { margin:0; padding:0 16px 0 0; font-size:12px; line-height:1.95; color:#d8cdb8; }
   .help .x { position:absolute; top:6px; left:10px; background:none; border:none; color:var(--mut); font-size:20px; cursor:pointer; }
-  .helpBtn { position:absolute; bottom:12px; left:12px; background:rgba(0,0,0,.55); border:1px solid var(--line); color:#d8cdb8; border-radius:8px; padding:7px 12px; font-size:12px; cursor:pointer; }
+
   kbd { background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.2); border-radius:4px; padding:0 6px; font-family:inherit; font-size:11px; }
   .toast { position:absolute; top:64px; left:50%; transform:translateX(-50%); background:#1f3d27; border:1px solid #3d7a4d; color:#d6f2dc; padding:10px 18px; border-radius:10px; font-size:13px; box-shadow:0 8px 24px rgba(0,0,0,.4); }
   .toast.err { background:#451f1f; border-color:#8a3d3d; color:#f6d6d6; }
