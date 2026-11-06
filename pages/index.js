@@ -107,9 +107,9 @@ export default function Home() {
 
     function initGallery(activePhotos, layoutData) {
       'use strict';
-      const EYE_HEIGHT = 1.6;
+      const EYE_HEIGHT = 1.5;
       const SHOW_DIST = 3.5;   // مسافة ظهور لوحة المعلومات الزجاجية
-      const OPEN_DIST = 2.0;   // مسافة السماح بفتح الصورة بالتكبير (مترين)
+      const OPEN_DIST = 3.5;   // مسافة السماح بفتح الصورة بالتكبير (مترين)
 
       const frames = layoutData.frames || DEFAULT_FRAMES;
       const customWalls = layoutData.walls;
@@ -682,7 +682,7 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>معرض الفوتوغرافيا الافتراضي — Modern Hall</title>
+        <title>معرض الفوتوغرافي الافتراضي — Modern Hall</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -804,8 +804,8 @@ export default function Home() {
       <div id="creditsPanel" className={creditsOpen ? 'open' : ''}>
         <h3 style={{ color: '#c9a35b', fontSize: '16px', marginBottom: '12px' }}>صُنع بواسطة</h3>
         <div style={{ fontSize: '13px', color: '#e9e3d8', lineHeight: 2.1 }}>
-          إعداد وإخراج: <b>أنور محمد</b><br />
-          إشراف قسم التصوير الضوئي: <b>عدنان الخمري</b><br />
+          تطوير: <b>AnwarBMA - أنور محمد</b><br />
+          إشراف :<b>عدنان الخمري</b><br />
           إدارة جمعية الثقافة والفنون بالطائف: <b>فيصل الخديدي</b>
         </div>
         <button className="panel-close" onClick={() => setCreditsOpen(false)}>إغلاق</button>
@@ -835,10 +835,10 @@ export default function Home() {
           <div style={{ fontSize: '11px', letterSpacing: '.38em', color: '#8a7a56', marginBottom: '16px', fontFamily: "Georgia, serif" }}>TAIF&nbsp;PHOTOGRAPHY&nbsp;GALLERY</div>
 
           <p style={{ color: '#9a9388', fontSize: '13.5px', lineHeight: 1.9, marginBottom: '6px' }}>
-            معرض الفوتوغرافيا الافتراضي — جمعية الثقافة والفنون بالطائف
+            معرض الفوتوغرافي الافتراضي — جمعية الثقافة والفنون بالطائف
           </p>
-          <div style={{ color: '#5f5848', fontSize: '10.5px', letterSpacing: '.12em', marginBottom: '26px', fontFamily: 'monospace' }}>
-            الموقع تحت الصيانه و الإنشاء حالياً تطوير : انور محمد بإشراف: عدنان الخمري — جمعية الثقافة والفنون بالطائف
+          <div style={{ color: '#ff0000', fontSize: '20.5px', letterSpacing: '.12em', marginBottom: '26px', fontFamily: 'monospace' }}>
+            الموقع تحت الصيانه و الإنشاء حالياً تطوير :انور محمد بإشراف: عدنان الخمري — جمعية الثقافة والفنون بالطائف
           </div>
 
           <input
@@ -858,7 +858,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div id="tooFarToast">اقترب أكثر من اللوحة لعرضها (مترين تقريباً)</div>
+      <div id="tooFarToast">اقترب أكثر من اللوحة لعرضها</div>
 
       <div className="info-glass" id="infoGlass" onClick={handleToggleGlass} style={{ position: 'fixed', top: '50%', right: '20px', transform: 'translateY(-50%)', width: '270px', maxWidth: '65vw', borderRadius: '16px', background: 'rgba(255, 255, 255, 0.08)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', padding: '16px', zIndex: 250, color: '#f3efe8', opacity: 0, pointerEvents: 'none', transition: 'opacity .4s ease, background .3s ease' }}>
         <div className="info-hint" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
@@ -892,7 +892,7 @@ export default function Home() {
       </div>
 
       <div id="lookHintMobile" style={{ position: 'fixed', right: '20px', bottom: '26px', zIndex: 300, display: 'none', color: 'rgba(255, 255, 255, .7)', fontSize: '12px', background: 'rgba(0, 0, 0, .5)', padding: '8px 12px', borderRadius: '8px', pointerEvents: 'none' }}>
-        عصا التحكم يسار الشاشة للحركة • اسحب الشاشة للنظر • انقر اللوحة للتكبير
+        جاهزيةالمعرض 65%
       </div>
     </>
   );
