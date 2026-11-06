@@ -1,12 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
 import Head from 'next/head';
-import { DEFAULT_FRAMES, FRAME_STYLE, ROOM_WALLS, normalizeFrames, assignPhotosToFrames, prepareDisplayTexture, fitImage, makeEmptyFrameTexture } from '../lib/galleryLayout';
+import { DEFAULT_FRAMES, FRAME_STYLE, ROOM_WALLS, normalizeFrames, normalizeWalls, assignPhotosToFrames, prepareDisplayTexture, fitImage, makeEmptyFrameTexture } from '../lib/galleryLayout';
 
 const PRESENCE_HEARTBEAT_MS = 20000;
 
 export default function Home() {
-  const [photos, setPhotos] = useState(null);   
-  const [layout, setLayout] = useState(null);   
+  const [photos, setPhotos] = useState(null);   // null = لم تُحمَّل بعد (مصفوفة فارغة = لا صور بعد، فتظهر كل الإطارات فارغة)
+  const [layout, setLayout] = useState(null);   // تخطيط الإطارات والجدران من /api/layout (null = لم يُحمَّل بعد)
   const [visitorName, setVisitorName] = useState('');
   const [entering, setEntering] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -48,11 +48,13 @@ export default function Home() {
       .then((r) => r.json())
       .then((d) => {
         const frames = normalizeFrames(d && d.frames);
+        const walls = normalizeWalls(d && d.walls);
         setLayout({
-          frames: frames.length ? frames : DEFAULT_FRAMES
+          frames: frames.length ? frames : DEFAULT_FRAMES,
+          walls: walls && walls.length ? walls : null
         });
       })
-      .catch(() => setLayout({ frames: DEFAULT_FRAMES }));
+      .catch(() => setLayout({ frames: DEFAULT_FRAMES, walls: null }));
 
     function useDefaultPhotos() {
       setPhotos([
@@ -106,14 +108,17 @@ export default function Home() {
     function initGallery(activePhotos, layoutData) {
       'use strict';
       const EYE_HEIGHT = 1.6;
-      const SHOW_DIST = 3.5;   
-      const OPEN_DIST = 2.0;   
+      const SHOW_DIST = 3.5;   // مسافة ظهور لوحة المعلومات الزجاجية
+      const OPEN_DIST = 2.0;   // مسافة السماح بفتح الصورة بالتكبير (مترين)
 
       const frames = layoutData.frames || DEFAULT_FRAMES;
+      const customWalls = layoutData.walls;
 
-      const MAT_PADDING = FRAME_STYLE.PAD;       
-      const FRAME_DEPTH = FRAME_STYLE.DEPTH;     
-      const IMAGE_OFFSET = FRAME_STYLE.IMAGE_OFFSET; 
+      const MAX_FRAME_W = FRAME_STYLE.MAX_W;
+      const MAX_FRAME_H = FRAME_STYLE.MAX_H;
+      const MAT_PADDING = FRAME_STYLE.PAD;       // هامش الإطار حول الصورة
+      const FRAME_DEPTH = FRAME_STYLE.DEPTH;     // سُمك الإطار (نصفه مغروس داخل الجدار)
+      const IMAGE_OFFSET = FRAME_STYLE.IMAGE_OFFSET; // إزاحة الصورة أمام وجه الإطار مباشرة
 
       function createWoodTexture() {
         const canvas = document.createElement('canvas');
@@ -192,11 +197,32 @@ export default function Home() {
       wallTex.repeat.set(4, 2);
       const wallMat = new window.THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.8 });
 
-      // استخدام الجدران الأصلية الثابتة والمضبوطة بعناية لضمان عمل المعرض بشكل مثالي
-      ROOM_WALLS.forEach((w) => {
-        const m = new window.THREE.Mesh(new window.THREE.BoxGeometry(w[0], w[1], w[2]), wallMat);
-        m.position.set(w[3], w[4], w[5]);
-        if (w[6]) m.rotation.y = w[6];
+      // رسم الجدران: الاعتماد على الجدران المخصصة إن وجدت، وإلا فالافتراضية
+      const activeWalls = (customWalls && customWalls.length > 0)
+        ? customWalls
+        : ROOM_WALLS.map((w, i) => ({
+            uid: 'w' + (i + 1),
+            width: w[0],
+            height: w[1],
+            depth: w[2],
+            x: w[3],
+            y: w[4],
+            z: w[5],
+            r: w[6] || 0
+          }));
+
+      activeWalls.forEach((w) => {
+        const wWidth = w.width !== undefined ? w.width : 6;
+        const wHeight = w.height !== undefined ? w.height : 3;
+        const wDepth = w.depth !== undefined ? w.depth : 0.3;
+        const wX = w.x !== undefined ? w.x : 0;
+        const wY = w.y !== undefined ? w.y : 1.5;
+        const wZ = w.z !== undefined ? w.z : 0;
+        const wR = w.r !== undefined ? w.r : 0;
+
+        const m = new window.THREE.Mesh(new window.THREE.BoxGeometry(wWidth, wHeight, wDepth), wallMat);
+        m.position.set(wX, wY, wZ);
+        m.rotation.y = wR;
         scene.add(m);
       });
 
@@ -245,6 +271,7 @@ export default function Home() {
         });
       });
 
+      // --- لوحة المفاتيح ---
       function onKeyDown(e) {
         if (fullscreenOpen || paused) return;
         if (e.code === 'KeyW' || e.code === 'ArrowUp') state.keys.w = true;
@@ -261,6 +288,7 @@ export default function Home() {
       window.addEventListener('keydown', onKeyDown);
       window.addEventListener('keyup', onKeyUp);
 
+      // --- تحكم الماوس ---
       function onMouseDown(e) {
         if (fullscreenOpen || paused) return;
         state.mouseLook = true;
@@ -295,6 +323,7 @@ export default function Home() {
       window.addEventListener('mousemove', onMouseMove);
       window.addEventListener('mouseup', onMouseUp);
 
+      // --- تحكم اللمس (الجوالات) ---
       const joyZone = document.getElementById('joyZone');
       const joyKnob = document.getElementById('joyKnob');
 
