@@ -583,7 +583,7 @@ export default function Home() {
       };
     }
   }, [photos]);
-}
+
   function startPresenceHeartbeat(name) {
     if (presenceTimerRef.current) clearInterval(presenceTimerRef.current);
     const sendBeat = () => {
