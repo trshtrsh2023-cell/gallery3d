@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { DEFAULT_FRAMES, normalizeFrames, assignPhotosToFrames } from '../../lib/galleryLayout';
@@ -44,6 +44,7 @@ const ICONS = {
   pulse: <path d="M22 12h-4l-3 9L9 3l-3 9H2" />,
   frame: <><rect x="3" y="3" width="18" height="18" rx="1" /><rect x="7" y="7" width="10" height="10" /></>,
   check: <path d="M20 6L9 17l-5-5" />,
+  list: <><path d="M8 6h13M8 12h13M8 18h13" /><path d="M3 6h.01M3 12h.01M3 18h.01" /></>,
   alert: <><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><path d="M12 9v4M12 17h.01" /></>,
   globe: <><circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></>
 };
@@ -107,6 +108,16 @@ export default function AdminDashboard() {
   const [vRange, setVRange] = useState('all');
   const [vPage, setVPage] = useState(1);
 
+  // سجل نشاط الإداريين
+  const [logs, setLogs] = useState([]);
+  const [logsMissing, setLogsMissing] = useState(false);
+  const [lAdmin, setLAdmin] = useState('all');
+  const [lCat, setLCat] = useState('all');
+  const [lRange, setLRange] = useState('all');
+  const [lSearch, setLSearch] = useState('');
+  const [lPage, setLPage] = useState(1);
+  const [lOpen, setLOpen] = useState(null);
+
   // الإداريون
   const [adminForm, setAdminForm] = useState({ username: '', password: '' });
 
@@ -118,6 +129,7 @@ export default function AdminDashboard() {
 
   const loadPhotos = useCallback(() => fetch('/api/admin/photos').then((r) => r.json()).then((d) => { setPhotos(Array.isArray(d) ? d : []); setLoaded((l) => ({ ...l, photos: true })); }).catch(() => {}), []);
   const loadVisits = useCallback(() => fetch('/api/visits').then((r) => r.json()).then((d) => { setVisits(Array.isArray(d) ? d : []); setLoaded((l) => ({ ...l, visits: true })); }).catch(() => {}), []);
+  const loadLogs = useCallback(() => fetch('/api/admin/logs').then((r) => r.json()).then((d) => { setLogs(Array.isArray(d.rows) ? d.rows : []); setLogsMissing(!!d.missing); }).catch(() => {}), []);
   const loadAdmins = useCallback(() => fetch('/api/admin/admins').then((r) => r.json()).then((d) => setAdmins(Array.isArray(d) ? d : [])).catch(() => {}), []);
   const loadPresence = useCallback(() => fetch('/api/presence').then((r) => r.json()).then((d) => setPresence({ count: d.count || 0, names: Array.isArray(d.names) ? d.names : [] })).catch(() => {}), []);
   const loadLayout = useCallback(() => fetch('/api/layout').then((r) => r.json()).then((d) => {
@@ -132,7 +144,7 @@ export default function AdminDashboard() {
       const d = await r.json().catch(() => ({}));
       setMe(d.username || '');
       setChecking(false);
-      loadPhotos(); loadVisits(); loadAdmins(); loadLayout(); loadPresence();
+      loadPhotos(); loadVisits(); loadAdmins(); loadLayout(); loadPresence(); loadLogs();
       fetch('/api/diag').then((x) => x.json()).then(setDiag).catch(() => {});
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -277,15 +289,48 @@ export default function AdminDashboard() {
       return true;
     });
 
+  // ---- سجل النشاط: تصفية + تصدير ----
+  const CAT_LABEL = { auth: 'الدخول والخروج', photo: 'اللوحات', layout: 'تعديل المعرض', admin: 'الحسابات' };
+  const logAdmins = useMemo(() => [...new Set(logs.map((l) => l.admin_username).filter(Boolean))], [logs]);
+  const filteredLogs = useMemo(() => {
+    const now = Date.now();
+    const days = lRange === 'today' ? 1 : lRange === '7' ? 7 : lRange === '30' ? 30 : 0;
+    const q = lSearch.trim().toLowerCase();
+    return logs.filter((l) => {
+      if (lAdmin !== 'all' && l.admin_username !== lAdmin) return false;
+      if (lCat !== 'all' && l.category !== lCat) return false;
+      if (days && now - new Date(l.created_at).getTime() > days * 86400000) return false;
+      if (q && !((l.summary || '').toLowerCase().includes(q) || JSON.stringify((l.details && l.details.lines) || []).toLowerCase().includes(q))) return false;
+      return true;
+    });
+  }, [logs, lAdmin, lCat, lRange, lSearch]);
+  useEffect(() => { setLPage(1); }, [lAdmin, lCat, lRange, lSearch]);
+  const LPER = 20;
+  const lPages = Math.max(1, Math.ceil(filteredLogs.length / LPER));
+  const logRows = filteredLogs.slice((lPage - 1) * LPER, lPage * LPER);
+
+  function exportLogsCsv() {
+    const esc = (x) => '"' + String(x ?? '').replace(/"/g, '""') + '"';
+    const head = ['الوقت', 'الإداري', 'القسم', 'العملية', 'الملخص', 'التفاصيل', 'الجهاز'];
+    const rows = filteredLogs.map((l) => [new Date(l.created_at).toISOString(), l.admin_username, CAT_LABEL[l.category] || l.category, l.action, l.summary, ((l.details && l.details.lines) || []).join(' | '), l.device].map(esc).join(','));
+    const blob = new Blob(['\ufeff' + [head.map(esc).join(','), ...rows].join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'admin-logs-' + new Date().toISOString().slice(0, 10) + '.csv';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
   if (checking) return <div className="d-loading" dir="rtl"><style dangerouslySetInnerHTML={{ __html: CSS }} />جاري التحقق من الجلسة…</div>;
 
   const NAV = [
     { id: 'overview', label: 'نظرة عامة', icon: 'home' },
     { id: 'photos', label: 'اللوحات', icon: 'image', badge: photos.length },
     { id: 'visits', label: 'الزوار والأجهزة', icon: 'users', badge: visits.length },
+    { id: 'logs', label: 'سجل النشاط', icon: 'list', badge: logs.length },
     { id: 'admins', label: 'الإداريون', icon: 'shield' }
   ];
-  const titles = { overview: 'نظرة عامة', photos: 'إدارة اللوحات', visits: 'الزوار والأجهزة', admins: 'الإداريون' };
+  const titles = { overview: 'نظرة عامة', photos: 'إدارة اللوحات', visits: 'الزوار والأجهزة', logs: 'سجل نشاط الإداريين', admins: 'الإداريون' };
 
   return (
     <div className="d-app" dir="rtl">
@@ -303,7 +348,7 @@ export default function AdminDashboard() {
         </div>
         <nav>
           {NAV.map((n) => (
-            <button key={n.id} className={'d-nav' + (tab === n.id ? ' on' : '')} onClick={() => { setTab(n.id); setNavOpen(false); }}>
+            <button key={n.id} className={'d-nav' + (tab === n.id ? ' on' : '')} onClick={() => { setTab(n.id); setNavOpen(false); if (n.id === 'logs') loadLogs(); }}>
               <Icon name={n.icon} /> <span>{n.label}</span>
               {n.badge !== undefined && <em>{n.badge}</em>}
             </button>
@@ -539,6 +584,71 @@ export default function AdminDashboard() {
           )}
 
           {/* ===================== الإداريون ===================== */}
+          {tab === 'logs' && (
+            <>
+              {logsMissing && <div className="d-note warnbox">جدول السجلات غير موجود بعد — نفّذ ملف <b>supabase_update_v11.sql</b> في Supabase SQL Editor ليبدأ تسجيل النشاط.</div>}
+              <div className="d-toolbar">
+                <label className="d-search"><Icon name="search" size={16} /><input placeholder="بحث في ملخص العملية وتفاصيلها…" value={lSearch} onChange={(e) => setLSearch(e.target.value)} /></label>
+                <select value={lAdmin} onChange={(e) => setLAdmin(e.target.value)}>
+                  <option value="all">كل الإداريين</option>
+                  {logAdmins.map((a) => <option key={a} value={a}>{a}</option>)}
+                </select>
+                <select value={lCat} onChange={(e) => setLCat(e.target.value)}>
+                  <option value="all">كل الأقسام</option>
+                  {Object.entries(CAT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+                <select value={lRange} onChange={(e) => setLRange(e.target.value)}>
+                  <option value="all">كل الفترات</option>
+                  <option value="today">اليوم</option>
+                  <option value="7">آخر ٧ أيام</option>
+                  <option value="30">آخر ٣٠ يوماً</option>
+                </select>
+                <button className="d-btn" onClick={loadLogs}>تحديث</button>
+                <button className="d-btn" onClick={exportLogsCsv} disabled={!filteredLogs.length}><Icon name="download" size={16} /> تصدير CSV</button>
+              </div>
+              <section className="d-panel flush">
+                <div className="d-tablewrap">
+                  <table className="d-table logs">
+                    <thead><tr><th>الوقت</th><th>الإداري</th><th>القسم</th><th>العملية</th><th>التفاصيل</th></tr></thead>
+                    <tbody>
+                      {logRows.map((l) => {
+                        const lines = (l.details && l.details.lines) || [];
+                        const open = lOpen === l.id;
+                        return (
+                          <Fragment key={l.id}>
+                            <tr className="lrow" onClick={() => lines.length && setLOpen(open ? null : l.id)}>
+                              <td>{fmtDateTime(l.created_at)}</td>
+                              <td><b>{l.admin_username || '—'}</b></td>
+                              <td><span className={'lcat ' + l.category}>{CAT_LABEL[l.category] || l.category}</span></td>
+                              <td className="lsum">{l.summary}</td>
+                              <td>{lines.length ? <span className="d-link">{open ? 'إخفاء' : `عرض (${lines.length})`}</span> : '—'}</td>
+                            </tr>
+                            {open && (
+                              <tr className="ldetail"><td colSpan={5}>
+                                <ul>{lines.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                                {l.device && <small>الجهاز: {l.device}</small>}
+                              </td></tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {filteredLogs.length === 0 && <p className="d-empty pad">{logs.length === 0 ? 'لا توجد سجلات بعد.' : 'لا سجلات مطابقة.'}</p>}
+                </div>
+                <div className="d-pager">
+                  <span>{filteredLogs.length} سجل</span>
+                  <div>
+                    <button disabled={lPage <= 1} onClick={() => setLPage((p) => p - 1)}>السابق</button>
+                    <b>{lPage} / {lPages}</b>
+                    <button disabled={lPage >= lPages} onClick={() => setLPage((p) => p + 1)}>التالي</button>
+                  </div>
+                </div>
+              </section>
+              <p className="d-note">يُسجَّل تلقائياً: الدخول والخروج ومحاولات الدخول الفاشلة، رفع اللوحات وتعديلها وحذفها وإعادة ترتيبها، كل عملية حفظ في محرر المعرض بتفاصيلها (إطارات وجدران وتوزيع اللوحات)، وإضافة/حذف الإداريين.</p>
+            </>
+          )}
+
           {tab === 'admins' && (
             <div className="d-grid2 wide">
               <section className="d-panel">
@@ -875,6 +985,11 @@ const CSS = `
   .d-fgrid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   .d-toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:#1f3d27; border:1px solid #3d7a4d; color:#d6f2dc; padding:11px 20px; border-radius:11px; font-size:13.5px; z-index:200; box-shadow:0 10px 30px rgba(0,0,0,.5); }
   .d-toast.err { background:#451f1f; border-color:#8a3d3d; color:#f6d6d6; } .d-toast.warn { background:#453a1f; border-color:#8a7a3d; color:#f6ecd6; }
+  .lrow { cursor:pointer; } .lsum { white-space:normal !important; min-width:260px; }
+  .lcat { font-size:11.5px; padding:2px 10px; border-radius:20px; background:rgba(255,255,255,.08); }
+  .lcat.layout { background:rgba(201,163,91,.18); color:var(--gold2); } .lcat.photo { background:rgba(95,168,160,.2); color:#8fd6cc; } .lcat.auth { background:rgba(255,255,255,.08); } .lcat.admin { background:rgba(185,122,143,.22); color:#e0a9bb; }
+  .ldetail td { background:rgba(255,255,255,.03); white-space:normal !important; } .ldetail ul { margin:0 0 6px; padding:0 18px 0 0; line-height:2; font-size:12.5px; } .ldetail small { color:var(--mut); }
+  .warnbox { background:rgba(240,201,135,.08); border:1px solid rgba(240,201,135,.3); border-radius:10px; padding:10px 14px; color:#f0c987; margin-bottom:14px; }
   .d-scrim { display:none; }
   @media (max-width: 960px) {
     .d-grid2, .d-grid2.wide { grid-template-columns:1fr; }

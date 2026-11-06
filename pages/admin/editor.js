@@ -334,6 +334,123 @@ function createEngine(THREE, host, cb) {
   function onKeyUp(e) { keys.delete(e.code); }
   function onBlur() { keys.clear(); looking = false; dragging = null; }
 
+
+  // ====================== التحكم باللمس (الهواتف والأجهزة اللوحية) ======================
+  // عصا تحكم يسار الشاشة للحركة، سحب بإصبع على المشهد للنظر، لمسة لتحديد إطار/جدار،
+  // وسحب الإطار/الجدار المحدد لنقله. أزرار ▲▼ للارتفاع و ⚡ لضبط السرعة.
+  const isTouchDevice = (typeof window !== 'undefined') && (('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0);
+  const joy = { on: false, x: 0, y: 0, id: null };
+  let vUp = false;
+  let vDown = false;
+  let tl = null; // اللمسة الحالية على المشهد
+  const touchEls = [];
+  dom.style.touchAction = 'none';
+
+  function mk(tag, css, txt) {
+    const el = document.createElement(tag);
+    el.style.cssText = css;
+    if (txt) el.textContent = txt;
+    host.appendChild(el);
+    touchEls.push(el);
+    return el;
+  }
+
+  function hitAt(cx, cy) {
+    const hits = castFromEvent({ clientX: cx, clientY: cy }).intersectObjects([...framePickables(), ...wallMeshList()], false);
+    const h = hits[0];
+    if (!h) return null;
+    if (h.object.userData.uid) return { type: 'frame', uid: h.object.userData.uid };
+    if (h.object.userData.wallUid) return { type: 'wall', uid: h.object.userData.wallUid };
+    return null;
+  }
+
+  function onTouchStartScene(e) {
+    if (tl) return;
+    const t = e.changedTouches[0];
+    e.preventDefault();
+    const hit = hitAt(t.clientX, t.clientY);
+    const sel = cb.getSelected ? cb.getSelected() : null;
+    const alreadySelected = !!(hit && sel && sel.type === hit.type && sel.uid === hit.uid);
+    tl = { id: t.identifier, sx: t.clientX, sy: t.clientY, lx: t.clientX, ly: t.clientY, moved: false, hit, mode: alreadySelected ? 'drag' : 'look' };
+    if (hit && !alreadySelected) {
+      if (hit.type === 'frame') cb.selectFrame(hit.uid); else cb.selectWall(hit.uid);
+    }
+    if (tl.mode === 'drag') dragging = { type: hit.type, uid: hit.uid, started: false, sx: t.clientX, sy: t.clientY };
+  }
+  function onTouchMoveScene(e) {
+    if (!tl) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier !== tl.id) continue;
+      e.preventDefault();
+      if (!tl.moved && Math.hypot(t.clientX - tl.sx, t.clientY - tl.sy) > 8) tl.moved = true;
+      if (!tl.moved) return;
+      if (tl.mode === 'drag') {
+        onMove({ clientX: t.clientX, clientY: t.clientY });
+      } else {
+        yaw -= (t.clientX - tl.lx) * 0.005;
+        pitch -= (t.clientY - tl.ly) * 0.005;
+        pitch = clamp(pitch, -1.5, 1.5);
+      }
+      tl.lx = t.clientX; tl.ly = t.clientY;
+    }
+  }
+  function onTouchEndScene(e) {
+    if (!tl) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier !== tl.id) continue;
+      // لمسة قصيرة على فراغ = إلغاء التحديد
+      if (!tl.moved && !tl.hit) { cb.selectFrame(null); cb.selectWall(null); }
+      dragging = null;
+      tl = null;
+    }
+  }
+
+  if (isTouchDevice) {
+    dom.addEventListener('touchstart', onTouchStartScene, { passive: false });
+    dom.addEventListener('touchmove', onTouchMoveScene, { passive: false });
+    dom.addEventListener('touchend', onTouchEndScene, { passive: false });
+    dom.addEventListener('touchcancel', onTouchEndScene, { passive: false });
+
+    // عصا الحركة (يسار الشاشة)
+    const base = mk('div', 'position:absolute;left:18px;bottom:18px;width:116px;height:116px;border-radius:50%;background:rgba(15,23,42,.55);border:1.5px solid rgba(255,255,255,.35);touch-action:none;z-index:30;');
+    const knob = mk('div', 'position:absolute;left:34px;top:34px;width:48px;height:48px;border-radius:50%;background:rgba(56,189,248,.9);pointer-events:none;');
+    host.removeChild(knob); touchEls.splice(touchEls.indexOf(knob), 1); base.appendChild(knob);
+    const setJoy = (cx, cy, r) => {
+      const dx = cx - r.left - r.width / 2;
+      const dy = cy - r.top - r.height / 2;
+      const max = r.width / 2 - 10;
+      const d = Math.hypot(dx, dy) || 1;
+      const k = Math.min(1, d / max);
+      joy.x = (dx / d) * k;
+      joy.y = (dy / d) * k;
+      knob.style.transform = 'translate(' + (joy.x * max) + 'px,' + (joy.y * max) + 'px)';
+    };
+    const joyEnd = () => { joy.on = false; joy.x = 0; joy.y = 0; joy.id = null; knob.style.transform = 'translate(0,0)'; };
+    base.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); const t = e.changedTouches[0]; joy.on = true; joy.id = t.identifier; setJoy(t.clientX, t.clientY, base.getBoundingClientRect()); }, { passive: false });
+    base.addEventListener('touchmove', (e) => { e.preventDefault(); e.stopPropagation(); for (const t of e.changedTouches) if (t.identifier === joy.id) setJoy(t.clientX, t.clientY, base.getBoundingClientRect()); }, { passive: false });
+    base.addEventListener('touchend', (e) => { e.preventDefault(); e.stopPropagation(); joyEnd(); }, { passive: false });
+    base.addEventListener('touchcancel', joyEnd, { passive: false });
+
+    // أزرار الارتفاع والسرعة (يمين الشاشة)
+    const btnCss = 'position:absolute;right:16px;width:52px;height:52px;border-radius:14px;background:rgba(15,23,42,.6);border:1.5px solid rgba(255,255,255,.35);color:#e2e8f0;font-size:20px;display:flex;align-items:center;justify-content:center;touch-action:none;user-select:none;-webkit-user-select:none;z-index:30;';
+    const hold = (el, on, off) => {
+      el.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); on(); }, { passive: false });
+      el.addEventListener('touchend', (e) => { e.preventDefault(); e.stopPropagation(); off(); }, { passive: false });
+      el.addEventListener('touchcancel', off, { passive: false });
+    };
+    const up = mk('div', btnCss + 'bottom:150px;', '▲');
+    const down = mk('div', btnCss + 'bottom:88px;', '▼');
+    hold(up, () => { vUp = true; }, () => { vUp = false; });
+    hold(down, () => { vDown = true; }, () => { vDown = false; });
+    const fast = mk('div', btnCss + 'bottom:26px;right:16px;width:52px;font-size:13px;', 'سرعة');
+    fast.addEventListener('touchstart', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      speed = speed >= 12 ? 3 : speed * 2;
+      cb.speed(speed);
+    }, { passive: false });
+  }
+  // ====================================================================================
+
   dom.addEventListener('contextmenu', onContext);
   dom.addEventListener('mousedown', onDown);
   dom.addEventListener('wheel', onWheel, { passive: false });
@@ -372,8 +489,12 @@ function createEngine(THREE, host, cb) {
     if (keys.has('KeyA')) mv.sub(right);
     if (keys.has('KeyE') || keys.has('Space')) mv.y += 1;
     if (keys.has('KeyQ') || keys.has('KeyC')) mv.y -= 1;
+    if (joy.on) { mv.addScaledVector(fwd, -joy.y); mv.addScaledVector(right, joy.x); }
+    if (vUp) mv.y += 1;
+    if (vDown) mv.y -= 1;
     if (mv.lengthSq() > 0) {
-      mv.normalize().multiplyScalar(speed * dt * (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 3 : 1));
+      const mag = Math.min(1, mv.length());
+      mv.normalize().multiplyScalar(mag * speed * dt * (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 3 : 1));
       camera.position.add(mv);
       camera.position.y = Math.max(0.2, camera.position.y);
     }
@@ -434,6 +555,11 @@ function createEngine(THREE, host, cb) {
       cancelAnimationFrame(raf);
       dom.removeEventListener('contextmenu', onContext);
       dom.removeEventListener('mousedown', onDown);
+      dom.removeEventListener('touchstart', onTouchStartScene);
+      dom.removeEventListener('touchmove', onTouchMoveScene);
+      dom.removeEventListener('touchend', onTouchEndScene);
+      dom.removeEventListener('touchcancel', onTouchEndScene);
+      touchEls.forEach((el) => { if (el.parentNode) el.parentNode.removeChild(el); });
       dom.removeEventListener('wheel', onWheel);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
@@ -534,7 +660,7 @@ export default function GalleryEditor() {
       if (cancelled) return;
       
       const baseFrames = normalizeFrames(lay && lay.frames);
-      const listFrames = (baseFrames.length ? baseFrames : DEFAULT_FRAMES).map((f) => ({ ...f, uid: newUid('f') }));
+      const listFrames = (baseFrames.length ? baseFrames : DEFAULT_FRAMES).map((f) => ({ ...f, uid: newUid('f'), origN: f.n }));
       
       const baseWalls = (lay && lay.walls) ? lay.walls : ROOM_WALLS.map((w, i) => ({
         uid: 'w' + (i + 1),
@@ -577,7 +703,8 @@ export default function GalleryEditor() {
       moveFrame: (uid, p) => cbRef.current.moveFrame(uid, p),
       moveWall: (uid, p) => cbRef.current.moveWall(uid, p),
       speed: (v) => setSpeed(Math.round(v * 10) / 10),
-      snapStep: () => (live.current.snap ? 0.25 : 0)
+      snapStep: () => (live.current.snap ? 0.25 : 0),
+      getSelected: () => (live.current.sel ? { type: 'frame', uid: live.current.sel } : live.current.selWall ? { type: 'wall', uid: live.current.selWall } : null)
     });
     engineRef.current = eng;
     setEngineReady(true);
@@ -754,7 +881,7 @@ export default function GalleryEditor() {
     if (!frames.length) { showToast('لا يمكن حفظ تخطيط بلا إطارات', 'err'); return; }
     setSaving(true);
     try {
-      const payloadFrames = frames.map((f) => ({ n: f.n, x: r3(f.x), y: r3(f.y), z: r3(f.z), r: r3(f.r), s: r3(f.s) }));
+      const payloadFrames = frames.map((f) => ({ o: f.origN ?? null, n: f.n, x: r3(f.x), y: r3(f.y), z: r3(f.z), r: r3(f.r), s: r3(f.s) }));
       const payloadWalls = walls.map((w) => ({ uid: w.uid, width: r3(w.width), height: r3(w.height), depth: r3(w.depth), x: r3(w.x), y: r3(w.y), z: r3(w.z), r: r3(w.r || 0) }));
       
       const uidByPhoto = {};
@@ -774,6 +901,7 @@ export default function GalleryEditor() {
       if (!res.ok) { showToast(data.error || 'فشل الحفظ', 'err'); setSaving(false); return; }
       setDirty(false);
       setIsDefault(false);
+      setFrames((fs) => fs.map((f) => ({ ...f, origN: f.n })));
       showToast('تم حفظ التخطيط والجدران بنجاح');
     } catch (e) {
       showToast('تعذّر الاتصال بالخادم', 'err');
@@ -784,7 +912,7 @@ export default function GalleryEditor() {
   const resetDefault = () => {
     if (!window.confirm('استعادة التخطيط الافتراضي؟ لن يُحفظ إلا بعد ضغط "حفظ".')) return;
     pushUndo();
-    const listFrames = DEFAULT_FRAMES.map((f) => ({ ...f, uid: newUid('f') }));
+    const listFrames = DEFAULT_FRAMES.map((f) => ({ ...f, uid: newUid('f'), origN: f.n }));
     const listWalls = ROOM_WALLS.map((w, i) => ({
       uid: 'w' + (i + 1), width: w[0], height: w[1], depth: w[2], x: w[3], y: w[4], z: w[5], r: w[6] || 0
     }));
@@ -1015,7 +1143,7 @@ export default function GalleryEditor() {
           <button className="btn ghost" onClick={handleLogout}>خروج</button>
         </div>
 
-        <div className="hud">سرعة الطيران: <b>{speed}</b> م/ث · عجلة الماوس لتغييرها</div>
+        <div className="hud">سرعة الطيران: <b>{speed}</b> م/ث <span className="hudDesk">· عجلة الماوس لتغييرها</span><span className="hudTouch"> · عصا اليسار: حركة · اسحب: نظر · المس ثم اسحب المحدد لنقله</span></div>
 
         {help ? (
           <div className="help">
@@ -1102,9 +1230,16 @@ const CSS = `
   .toast { position:absolute; top:64px; left:50%; transform:translateX(-50%); background:#1f3d27; border:1px solid #3d7a4d; color:#d6f2dc; padding:10px 18px; border-radius:10px; font-size:13px; box-shadow:0 8px 24px rgba(0,0,0,.4); }
   .toast.err { background:#451f1f; border-color:#8a3d3d; color:#f6d6d6; }
   .toast.warn { background:#453a1f; border-color:#8a7a3d; color:#f6ecd6; }
+  .hudTouch { display:none; }
+  @media (pointer: coarse) { .hudDesk { display:none; } .hudTouch { display:inline; } }
   @media (max-width: 860px) {
-    .ed { flex-direction:column-reverse; }
-    .panel { width:100%; height:42vh; border-left:none; border-top:1px solid var(--line); }
+    .ed { flex-direction:column-reverse; height:100dvh; }
+    .panel { width:100%; height:42vh; border-left:none; border-top:1px solid var(--line); -webkit-overflow-scrolling:touch; }
     .help { display:none; }
+    .hud { top:56px; bottom:auto; right:8px; left:8px; font-size:11px; text-align:center; }
+    .hudDesk { display:none; } .hudTouch { display:inline; }
+    .topbar { gap:5px; left:8px; right:8px; top:8px; }
+    .topbar .btn { padding:6px 9px; font-size:11.5px; }
+    .toast { top:96px; }
   }
 `;

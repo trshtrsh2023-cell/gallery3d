@@ -1,6 +1,8 @@
 import { getSupabaseAdmin } from '../../lib/supabaseAdmin';
 import { getAdminFromReq } from '../../lib/auth';
 import { DEFAULT_FRAMES, ROOM_WALLS, normalizeFrames } from '../../lib/galleryLayout';
+import { logAdmin } from '../../lib/adminLog';
+import { diffLayout } from '../../lib/layoutDiff';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -52,6 +54,25 @@ export default async function handler(req, res) {
 
       const walls = Array.isArray(rawWalls) ? rawWalls : defaultWalls;
 
+      // الرقم السابق لكل إطار (o) لتسجيل إعادة الترقيم بدقة — يُقرأ من الطلب الخام
+      const oByN = new Map(rawFrames.map((f) => [Math.round(Number(f.n)), f.o]));
+      const framesForDiff = frames.map((f) => ({ ...f, o: oByN.get(f.n) }));
+
+      // الحالة السابقة (قبل الحفظ) لحساب الفروقات
+      let prevFrames = DEFAULT_FRAMES;
+      let prevWalls = defaultWalls;
+      try {
+        const { data: prev } = await supabase.from('gallery_layout').select('frames, walls').eq('id', 1).maybeSingle();
+        if (prev) {
+          const pf = normalizeFrames(prev.frames);
+          if (pf.length) prevFrames = pf;
+          if (Array.isArray(prev.walls) && prev.walls.length) prevWalls = prev.walls;
+        }
+      } catch (e) { /* نستخدم الافتراضي */ }
+      const { data: prevPhotos } = await supabase.from('photos').select('id, title, slot_index');
+      const prevSlots = new Map((prevPhotos || []).map((p) => [String(p.id), p.slot_index ?? null]));
+      const photoTitles = new Map((prevPhotos || []).map((p) => [String(p.id), p.title || 'بدون عنوان']));
+
       const { error } = await supabase
         .from('gallery_layout')
         .upsert([{ 
@@ -83,6 +104,9 @@ export default async function handler(req, res) {
           if (!upErr) photosUpdated++;
         }
       }
+
+      const d = diffLayout({ prevFrames, newFrames: framesForDiff, prevWalls, newWalls: walls, prevSlots, newSlots: photoSlots, photoTitles });
+      await logAdmin(supabase, req, admin, 'layout', 'layout.save', d.summary, { lines: d.lines, counts: d.counts, frames: frames.length, walls: walls.length });
 
       return res.status(200).json({ ok: true, frames: frames.length, walls: walls.length, photosUpdated });
     } catch (e) {

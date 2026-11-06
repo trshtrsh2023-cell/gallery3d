@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
+import { logAdmin } from '../../../lib/adminLog';
 
 // نقطة إنشاء أول حساب أدمن دون الحاجة لتشغيل bcrypt يدوياً محلياً.
 // محمية بـ ADMIN_SETUP_SECRET (متغيّر بيئة تضعه أنت) — إن لم يتطابق تُرفض.
@@ -39,6 +40,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'فشل إنشاء الحساب في Supabase: ' + error.message });
     }
 
+    await logAdmin(supabase, req, data.username, 'admin', 'admin.setup', `إنشاء/تحديث الحساب «${data.username}» عبر صفحة الإعداد (بسر الإعداد)`, null);
     return res.status(200).json({ ok: true, username: data.username });
   } catch (e) {
     console.error('admin setup crashed:', e);

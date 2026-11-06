@@ -4,6 +4,26 @@ import { DEFAULT_FRAMES, FRAME_STYLE, ROOM_WALLS, normalizeFrames, normalizeWall
 
 const PRESENCE_HEARTBEAT_MS = 20000;
 
+// جلسة دخول الزائر: تُحفظ في المتصفح ٣ ساعات ثم تُزال تلقائياً (سجل الزيارة يبقى في قاعدة البيانات)
+const SESSION_KEY = 'gallery_visitor_session';
+const SESSION_TTL_MS = 3 * 60 * 60 * 1000;
+function readSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || !o.name || !o.expires || Date.now() >= o.expires) { localStorage.removeItem(SESSION_KEY); return null; }
+    return o;
+  } catch (e) { return null; }
+}
+function writeSession(name, prev) {
+  const started = prev && prev.started ? prev.started : Date.now();
+  const o = { name, started, expires: started + SESSION_TTL_MS, logged: true };
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(o)); } catch (e) {}
+  return o;
+}
+function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch (e) {} }
+
 export default function Home() {
   const [photos, setPhotos] = useState(null);   // null = لم تُحمَّل بعد (مصفوفة فارغة = لا صور بعد، فتظهر كل الإطارات فارغة)
   const [layout, setLayout] = useState(null);   // تخطيط الإطارات والجدران من /api/layout (null = لم يُحمَّل بعد)
@@ -14,7 +34,10 @@ export default function Home() {
   const [presence, setPresence] = useState({ count: 0, names: [] });
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [autoSession, setAutoSession] = useState(null); // جلسة محفوظة صالحة => دخول تلقائي
+  const [sessionNotice, setSessionNotice] = useState('');
   const presenceTimerRef = useRef(null);
+  const sessionTimerRef = useRef(null);
   const sessionIdRef = useRef(null);
 
   useEffect(() => {
@@ -71,6 +94,8 @@ export default function Home() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     setIsMobile(('ontouchstart' in window) || navigator.maxTouchPoints > 0);
+    const saved = readSession();
+    if (saved) { setVisitorName(saved.name); setEntering(true); setAutoSession(saved); }
     try {
       let sid = sessionStorage.getItem('gallery_session_id');
       if (!sid) {
@@ -81,7 +106,10 @@ export default function Home() {
     } catch (e) {
       sessionIdRef.current = Math.random().toString(36).slice(2);
     }
-    return () => { if (presenceTimerRef.current) clearInterval(presenceTimerRef.current); };
+    return () => {
+      if (presenceTimerRef.current) clearInterval(presenceTimerRef.current);
+      if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -610,6 +638,78 @@ export default function Home() {
       clearInterval(presenceTimerRef.current);
       presenceTimerRef.current = null;
     }
+    // نُبلغ الخادم بالمغادرة فوراً حتى لا يبقى الزائر "متواجداً" بعد خروجه
+    fetch('/api/presence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionIdRef.current, action: 'leave' })
+    }).catch(() => {});
+  }
+
+  function showEntry(show) {
+    const entry = document.getElementById('entryOverlay');
+    const joyWrap = document.getElementById('joyWrap');
+    const lookHint = document.getElementById('lookHintMobile');
+    if (entry) entry.style.display = show ? 'flex' : 'none';
+    if (!show && isMobile) {
+      if (joyWrap) joyWrap.style.display = 'block';
+      if (lookHint) lookHint.style.display = 'block';
+    }
+    if (show) {
+      if (joyWrap) joyWrap.style.display = 'none';
+      if (lookHint) lookHint.style.display = 'none';
+    }
+  }
+
+  // انتهاء جلسة الـ٣ ساعات: تُزال بيانات الدخول من المتصفح ويعود الزائر للصفحة الرئيسية
+  function expireSession() {
+    clearSession();
+    if (sessionTimerRef.current) { clearTimeout(sessionTimerRef.current); sessionTimerRef.current = null; }
+    showEntry(true);
+    window.dispatchEvent(new Event('gallery:pause'));
+    stopPresenceHeartbeat();
+    setVisitorName('');
+    setEntering(false);
+    setSessionNotice('انتهت جلسة دخولك (٣ ساعات). أدخل اسمك للمتابعة.');
+  }
+
+  // auto = دخول تلقائي بجلسة محفوظة (لا يُسجَّل كزيارة جديدة)
+  async function doEnter(name, auto) {
+    setEntering(true);
+    setSessionNotice('');
+    const prev = readSession();
+    const sameSession = prev && prev.name === name ? prev : null;
+    if (!sameSession) {
+      // دخول جديد => يُسجَّل في سجل الزوار مرة واحدة طوال مدة الجلسة
+      try {
+        let model = null;
+        try {
+          if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+            const hv = await navigator.userAgentData.getHighEntropyValues(['model']);
+            model = hv && hv.model ? hv.model : null;
+          }
+        } catch (e2) {}
+        await fetch('/api/visits', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            visitor_name: name,
+            screen: `${window.screen.width}x${window.screen.height}`,
+            touch: navigator.maxTouchPoints || 0,
+            lang: navigator.language || '',
+            model
+          })
+        });
+      } catch (e) {}
+    }
+    const sess = writeSession(name, sameSession);
+    if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current);
+    sessionTimerRef.current = setTimeout(expireSession, Math.max(1000, sess.expires - Date.now()));
+
+    showEntry(false);
+    window.dispatchEvent(new Event('gallery:resume'));
+    startPresenceHeartbeat(name);
+    setEntering(false);
   }
 
   async function handleEnter() {
@@ -618,38 +718,25 @@ export default function Home() {
       alert('الرجاء كتابة اسمك أولاً');
       return;
     }
-    setEntering(true);
-    try {
-      let model = null;
-      try {
-        if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
-          const hv = await navigator.userAgentData.getHighEntropyValues(['model']);
-          model = hv && hv.model ? hv.model : null;
-        }
-      } catch (e2) {}
-      await fetch('/api/visits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          visitor_name: name,
-          screen: `${window.screen.width}x${window.screen.height}`,
-          touch: navigator.maxTouchPoints || 0,
-          lang: navigator.language || '',
-          model
-        })
-      });
-    } catch (e) {}
-    const entry = document.getElementById('entryOverlay');
-    const joyWrap = document.getElementById('joyWrap');
-    const lookHint = document.getElementById('lookHintMobile');
-    if (entry) entry.style.display = 'none';
-    if (isMobile) {
-      if (joyWrap) joyWrap.style.display = 'block';
-      if (lookHint) lookHint.style.display = 'block';
-    }
-    window.dispatchEvent(new Event('gallery:resume'));
-    startPresenceHeartbeat(name);
-    setEntering(false);
+    await doEnter(name, false);
+  }
+
+  // الدخول التلقائي عند وجود جلسة محفوظة صالحة
+  useEffect(() => {
+    if (autoSession) doEnter(autoSession.name, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSession]);
+
+  // تسجيل خروج الزائر: يمسح الجلسة المحفوظة ويعيده لصفحة إدخال الاسم
+  function handleVisitorLogout() {
+    setMenuOpen(false);
+    clearSession();
+    if (sessionTimerRef.current) { clearTimeout(sessionTimerRef.current); sessionTimerRef.current = null; }
+    showEntry(true);
+    window.dispatchEvent(new Event('gallery:pause'));
+    stopPresenceHeartbeat();
+    setVisitorName('');
+    setSessionNotice('تم تسجيل خروجك. نراك قريباً!');
   }
 
   function handleExitToHome() {
@@ -781,6 +868,10 @@ export default function Home() {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
           العودة للصفحة الرئيسية
         </button>
+        <button className="menu-item" onClick={handleVisitorLogout}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
+          تسجيل الخروج
+        </button>
         <button className="menu-item" onClick={() => { setCreditsOpen(true); setMenuOpen(false); }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
           صُنع بواسطة
@@ -841,6 +932,7 @@ export default function Home() {
             الموقع تحت الصيانه و الإنشاء حالياً تطوير :انور محمد بإشراف: عدنان الخمري — جمعية الثقافة والفنون بالطائف
           </div>
 
+          {sessionNotice && <div style={{ color: '#c9a35b', fontSize: '13px', marginBottom: '12px' }}>{sessionNotice}</div>}
           <input
             id="entryNameInput"
             placeholder="اكتب اسمك هنا..."

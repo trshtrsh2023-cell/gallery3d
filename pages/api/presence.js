@@ -6,6 +6,7 @@ import { getSupabaseAdmin } from '../../lib/supabaseAdmin';
 const ACTIVE_WINDOW_MS = 45000;
 
 export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return res.status(200).json(req.method === 'GET' ? { count: 0, names: [] } : { ok: false });
@@ -13,8 +14,12 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     try {
-      const { session_id, visitor_name } = req.body || {};
+      const { session_id, visitor_name, action } = req.body || {};
       if (!session_id) return res.status(400).json({ error: 'session_id مفقود' });
+      if (action === 'leave') {
+        await supabase.from('presence').delete().eq('session_id', String(session_id).slice(0, 64));
+        return res.status(200).json({ ok: true });
+      }
       const name = (visitor_name || 'زائر').toString().trim().slice(0, 80) || 'زائر';
 
       const { error } = await supabase

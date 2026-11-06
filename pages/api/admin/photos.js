@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
 import { getAdminFromReq } from '../../../lib/auth';
+import { logAdmin } from '../../../lib/adminLog';
 
 export const config = {
   api: { bodyParser: { sizeLimit: '12mb' } }
@@ -68,6 +69,10 @@ export default async function handler(req, res) {
         .single();
 
       if (error) return res.status(500).json({ error: error.message });
+      await logAdmin(supabase, req, admin, 'photo', 'photo.add', `رفع لوحة جديدة «${data.title}»${data.slot_index ? ' في الإطار ' + data.slot_index : ''}`, {
+        id: data.id, title: data.title, photographer: data.photographer, camera: data.camera, year: data.year, location: data.location, slot_index: data.slot_index, image_url: data.image_url,
+        lines: [`العنوان: ${data.title}`, data.photographer ? `المصور: ${data.photographer}` : null, data.location ? `الموقع: ${data.location}` : null, `الإطار: ${data.slot_index || 'تلقائي'}`].filter(Boolean)
+      });
       return res.status(200).json(data);
     } catch (e) {
       console.error('photo upload crashed:', e);
@@ -89,8 +94,17 @@ export default async function handler(req, res) {
       if (location !== undefined) patch.location = location;
       if (slot_index !== undefined) patch.slot_index = slot_index ? Number(slot_index) : null;
 
+      const { data: before } = await supabase.from('photos').select('*').eq('id', id).maybeSingle();
       const { data, error } = await supabase.from('photos').update(patch).eq('id', id).select().single();
       if (error) return res.status(500).json({ error: error.message });
+      const labels = { title: 'العنوان', photographer: 'المصور', camera: 'الكاميرا', year: 'السنة', location: 'الموقع', slot_index: 'الإطار' };
+      const lines = [];
+      Object.keys(patch).forEach((k) => {
+        const a = before ? before[k] : null;
+        const b = data[k];
+        if (String(a ?? '') !== String(b ?? '')) lines.push(`${labels[k] || k}: «${a ?? '—'}» ← «${b ?? '—'}»`);
+      });
+      if (lines.length) await logAdmin(supabase, req, admin, 'photo', 'photo.edit', `تعديل بيانات اللوحة «${data.title || id}»`, { id, lines });
       return res.status(200).json(data);
     } catch (e) {
       console.error('photo patch crashed:', e);
@@ -107,6 +121,7 @@ export default async function handler(req, res) {
       for (const item of order) {
         await supabase.from('photos').update({ sort_order: item.sort_order }).eq('id', item.id);
       }
+      await logAdmin(supabase, req, admin, 'photo', 'photo.reorder', `إعادة ترتيب اللوحات (${order.length} لوحة)`, null);
       return res.status(200).json({ ok: true });
     } catch (e) {
       console.error('reorder crashed:', e);
@@ -121,12 +136,13 @@ export default async function handler(req, res) {
       const { id } = req.body || {};
       if (!id) return res.status(400).json({ error: 'المعرّف مفقود' });
 
-      const { data: row } = await supabase.from('photos').select('storage_path').eq('id', id).single();
+      const { data: row } = await supabase.from('photos').select('storage_path, title, slot_index').eq('id', id).single();
       if (row?.storage_path) {
         await supabase.storage.from(BUCKET).remove([row.storage_path]);
       }
       const { error } = await supabase.from('photos').delete().eq('id', id);
       if (error) return res.status(500).json({ error: error.message });
+      await logAdmin(supabase, req, admin, 'photo', 'photo.delete', `حذف اللوحة «${(row && row.title) || id}»`, { id, title: row && row.title, slot_index: row && row.slot_index, lines: [`الإطار الذي كانت فيه: ${(row && row.slot_index) || 'تلقائي'}`] });
       return res.status(200).json({ ok: true });
     } catch (e) {
       console.error('delete crashed:', e);

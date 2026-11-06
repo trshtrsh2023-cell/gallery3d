@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
 import { getAdminFromReq } from '../../../lib/auth';
+import { logAdmin } from '../../../lib/adminLog';
 
 // إدارة حسابات الإداريين — محمية بالكامل، يجب أن تكون مسجّل دخول كأدمن
 export default async function handler(req, res) {
@@ -32,6 +33,7 @@ export default async function handler(req, res) {
         if (error.code === '23505') return res.status(409).json({ error: 'اسم المستخدم موجود مسبقاً' });
         return res.status(500).json({ error: error.message });
       }
+      await logAdmin(supabase, req, me, 'admin', 'admin.create', `إضافة إداري جديد «${data.username}»`, { username: data.username });
       return res.status(200).json(data);
     } catch (e) {
       console.error('admin create crashed:', e);
@@ -50,8 +52,10 @@ export default async function handler(req, res) {
       if ((count || 0) <= 1) {
         return res.status(400).json({ error: 'لا يمكن حذف آخر حساب أدمن متبقٍ' });
       }
+      const { data: target } = await supabase.from('admins').select('username').eq('id', id).maybeSingle();
       const { error } = await supabase.from('admins').delete().eq('id', id);
       if (error) return res.status(500).json({ error: error.message });
+      await logAdmin(supabase, req, me, 'admin', 'admin.delete', `حذف حساب الإداري «${(target && target.username) || id}»`, { username: target && target.username });
       return res.status(200).json({ ok: true });
     } catch (e) {
       console.error('admin delete crashed:', e);
