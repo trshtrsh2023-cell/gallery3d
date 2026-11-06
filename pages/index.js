@@ -16,45 +16,6 @@ export default function Home() {
   const sessionIdRef = useRef(null);
 
   useEffect(() => {
-    fetch('/api/photos')
-      .then((res) => {
-        if (!res.ok) throw new Error('فشل جلب الصور من الخادم');
-        return res.json();
-      })
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          const formattedPhotos = data.map((p) => ({
-            title: p.title || 'لوحة فنية',
-            url: p.image_url || p.url,
-            ph: p.photographer || 'مصور المعرض',
-            cam: p.camera || 'Canon EOS R5',
-            yr: p.year || '2025',
-            loc: p.location || 'الطائف',
-            slot: p.slot_index || null
-          }));
-          setPhotos(formattedPhotos);
-        } else {
-          useDefaultPhotos();
-        }
-      })
-      .catch((err) => {
-        console.log('استخدام الصور الافتراضية لخطأ في الـ API:', err);
-        useDefaultPhotos();
-      });
-
-    function useDefaultPhotos() {
-      setPhotos([
-        { title: 'غروب الطائف', url: 'https://picsum.photos/seed/taif1/900/600', ph: 'أنور محمد', cam: 'Canon EOS R5', yr: '2025', loc: 'الشفا' },
-        { title: 'شفا الطائف', url: 'https://picsum.photos/seed/taif2/900/600', ph: 'عدنان الخمري', cam: 'Sony A7IV', yr: '2025', loc: 'الطائف' },
-        { title: 'ورود الطائف', url: 'https://picsum.photos/seed/taif3/900/600', ph: 'أنور محمد', cam: 'Canon EOS R5', yr: '2024', loc: 'الهدا' },
-        { title: 'التراث القديم', url: 'https://picsum.photos/seed/taif4/900/600', ph: 'فيصل الخديدي', cam: 'Nikon Z8', yr: '2025', loc: 'البلد' },
-        { title: 'جبال الهدا', url: 'https://picsum.photos/seed/taif5/900/600', ph: 'أنور محمد', cam: 'Canon EOS R5', yr: '2024', loc: 'الهدا' },
-        { title: 'ليالي الطائف', url: 'https://picsum.photos/seed/taif6/900/600', ph: 'عدنان الخمري', cam: 'Sony A7IV', yr: '2025', loc: 'الطائف' }
-      ]);
-    }
-  }, []);
-
-  useEffect(() => {
     if (typeof window === 'undefined') return;
     setIsMobile(('ontouchstart' in window) || navigator.maxTouchPoints > 0);
     try {
@@ -93,9 +54,9 @@ export default function Home() {
 
     function initGallery(activePhotos) {
       'use strict';
-      const EYE_HEIGHT = 1.6;
-      const SHOW_DIST = 3.5;   // مسافة ظهور لوحة المعلومات الزجاجية
-      const OPEN_DIST = 2.0;   // مسافة السماح بفتح الصورة بالتكبير (مترين)
+      const EYE_HEIGHT = 1.5;
+      const SHOW_DIST = 3.0;   // مسافة ظهور لوحة المعلومات الزجاجية
+      const OPEN_DIST = 3.0;   // مسافة السماح بفتح الصورة بالتكبير (مترين)
 
       // مواقع اللوحات: الإحداثيات هنا هي بالضبط سطح الجدار المجاور (لا فراغ)،
       // واللوحة تُغرَس جزئياً داخل الجدار عبر الإزاحة الصغيرة لاحقاً بدل أن
@@ -161,7 +122,7 @@ export default function Home() {
         const canvas = document.createElement('canvas');
         canvas.width = 256; canvas.height = 256;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#e8e3dc';
+        ctx.fillStyle = '#c2c2c2';
         ctx.fillRect(0, 0, 256, 256);
         for (let i = 0; i < 500; i++) {
           ctx.fillStyle = 'rgba(0,0,0,0.015)';
@@ -376,14 +337,12 @@ export default function Home() {
       function onTouchStart(e) {
         if (fullscreenOpen || paused) return;
         for (const t of e.changedTouches) {
-          // نحدد منطقة تفعيل الجويستيك من موقعه الحقيقي على الشاشة (مع هامش
-          // بسيط حوله لسهولة اللمس) بدل نسبة ثابتة من أبعاد الشاشة — هذا
-          // يضمن أن منطقة اللمس تطابق دائماً مكان ظهور الجويستيك فعلياً
           let isNearJoystick = false;
           let r = null;
           if (joyZone) {
             r = joyZone.getBoundingClientRect();
-            const pad = 34;
+            // زيادة الهامش قليلاً لتسهيل الاستجابة الفورية للمس فوق الدائرة مباشرة
+            const pad = 40; 
             isNearJoystick = t.clientX >= r.left - pad && t.clientX <= r.right + pad &&
               t.clientY >= r.top - pad && t.clientY <= r.bottom + pad;
           }
@@ -403,21 +362,25 @@ export default function Home() {
           state.tap[t.identifier] = { x: t.clientX, y: t.clientY, moved: false };
         }
       }
+
       function onTouchMove(e) {
         for (const t of e.changedTouches) {
           const tp = state.tap[t.identifier];
           if (tp && Math.hypot(t.clientX - tp.x, t.clientY - tp.y) > 8) tp.moved = true;
+          
           if (state.joy.a && t.identifier === state.joy.id) {
             let dx = t.clientX - state.joy.cx, dy = t.clientY - state.joy.cy;
             const max = 40, len = Math.hypot(dx, dy);
             if (len > max) { dx = dx / len * max; dy = dy / len * max; }
             state.joy.dx = dx / max;
             state.joy.dy = dy / max;
+            
+            // التعديل هنا: استخدام التمركز الصحيح (translate) لكي يتطابق مع الـ CSS الجديد
             if (joyKnob) {
-              joyKnob.style.left = (31 + dx) + 'px';
-              joyKnob.style.top = (31 + dy) + 'px';
+              joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
             }
           }
+
           if (state.look.a && t.identifier === state.look.id) {
             state.yaw -= (t.clientX - state.look.lx) * 0.0035;
             state.pitch -= (t.clientY - state.look.ly) * 0.0035;
@@ -427,6 +390,7 @@ export default function Home() {
           }
         }
       }
+
       function onTouchEnd(e) {
         for (const t of e.changedTouches) {
           const tp = state.tap[t.identifier];
@@ -434,21 +398,23 @@ export default function Home() {
             triggerRaycast(t.clientX, t.clientY);
           }
           delete state.tap[t.identifier];
+          
           if (state.joy.a && t.identifier === state.joy.id) {
             state.joy.a = false;
             state.joy.dx = 0; state.joy.dy = 0;
+            
+            // إعادة الزر لمنتصف الدائرة تماماً عند الإفلات
             if (joyKnob) {
-              joyKnob.style.left = '31px';
-              joyKnob.style.top = '31px';
+              joyKnob.style.transform = 'translate(-50%, -50%)';
             }
           }
           if (state.look.a && t.identifier === state.look.id) state.look.a = false;
         }
       }
+
       renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: true });
       renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: true });
       renderer.domElement.addEventListener('touchend', onTouchEnd);
-
       function showTooFarHint() {
         const el = document.getElementById('tooFarToast');
         if (!el) return;
@@ -617,7 +583,7 @@ export default function Home() {
       };
     }
   }, [photos]);
-
+}
   function startPresenceHeartbeat(name) {
     if (presenceTimerRef.current) clearInterval(presenceTimerRef.current);
     const sendBeat = () => {
@@ -879,9 +845,9 @@ export default function Home() {
       <div id="tooFarToast">اقترب أكثر من اللوحة لعرضها (مترين تقريباً)</div>
 
       {/* لوحة معلومات الصورة على اليمين */}
-      <div className="info-glass" id="infoGlass" onClick={handleToggleGlass} style={{ position: 'fixed', top: '50%', right: '20px', transform: 'translateY(-50%)', width: '270px', maxWidth: '65vw', borderRadius: '16px', background: 'rgba(255, 255, 255, 0.08)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', padding: '16px', zIndex: 250, color: '#f3efe8', opacity: 0, pointerEvents: 'none', transition: 'opacity .4s ease, background .3s ease' }}>
+      <div className="info-glass" id="infoGlass" onClick={handleToggleGlass} style={{ position: 'fixed', top: '50%', right: '20px', transform: 'translateY(-50%)', width: '270px', maxWidth: '65vw', borderRadius: '16px', background: 'rgba(7, 7, 7, 0.5)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', padding: '16px', zIndex: 250, color: '#f3efe8', opacity: 0, pointerEvents: 'none', transition: 'opacity .4s ease, background .3s ease' }}>
         <div className="info-hint" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
-          <span className="info-dot" style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#c9a35b', flexShrink: 0 }}></span>
+          <span className="info-dot" style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#fffefd', flexShrink: 0 }}></span>
           <span>اضغط لتفاصيل الصورة</span>
         </div>
         <div className="info-body" style={{ display: 'none', cursor: 'pointer' }}>
@@ -905,10 +871,10 @@ export default function Home() {
         </div>
       </div>
 
-      {/* أداة التحكم بالجوال (Joystick) */}
-      <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, display: 'none', opacity: 0.3 }}>
+      {/* أداة التحكم بالجوال*/}
+      <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, display: 'block', touchAction: 'none' }}>
         <div id="joyZone" style={{ width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(30, 25, 20, .42)', border: '1px solid rgba(255, 255, 255, .32)', position: 'relative', touchAction: 'none' }}>
-          <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .95)', position: 'absolute', top: '31px', left: '31px', pointerEvents: 'none' }}></div>
+          <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .95)', position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }}></div>
         </div>
       </div>
 
@@ -917,4 +883,4 @@ export default function Home() {
       </div>
     </>
   );
-}
+
