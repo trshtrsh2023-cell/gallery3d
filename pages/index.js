@@ -44,7 +44,6 @@ export default function Home() {
         useDefaultPhotos();
       });
 
-    // جلب التخطيط والجدران المخصصة من الخادم تماماً مثل المحرر
     fetch('/api/layout')
       .then((r) => r.json())
       .then((d) => {
@@ -134,19 +133,6 @@ export default function Home() {
         return new window.THREE.CanvasTexture(canvas);
       }
 
-      function createWallTexture() {
-        const canvas = document.createElement('canvas');
-        canvas.width = 256; canvas.height = 256;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#e8e3dc';
-        ctx.fillRect(0, 0, 256, 256);
-        for (let i = 0; i < 500; i++) {
-          ctx.fillStyle = 'rgba(0,0,0,0.015)';
-          ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
-        }
-        return new window.THREE.CanvasTexture(canvas);
-      }
-
       const state = {
         yaw: 0, pitch: 0,
         keys: { w: false, s: false, a: false, d: false },
@@ -167,7 +153,7 @@ export default function Home() {
 
       scene = new window.THREE.Scene();
       scene.background = new window.THREE.Color(0x141210);
-      camera = new window.THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera = new window.THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.05, 400);
       camera.position.set(0, EYE_HEIGHT, 14);
       camera.rotation.order = 'YXZ';
 
@@ -177,26 +163,23 @@ export default function Home() {
       renderer.outputColorSpace = window.THREE.SRGBColorSpace;
       host.appendChild(renderer.domElement);
 
-      scene.add(new window.THREE.AmbientLight(0xfff5ea, 0.55));
-      scene.add(new window.THREE.HemisphereLight(0xfff1de, 0x3a2a1c, 0.28));
-      const sun = new window.THREE.DirectionalLight(0xfff0dd, 0.22);
-      sun.position.set(4, 9, 6);
+      scene.add(new window.THREE.AmbientLight(0xfff5ea, 0.6));
+      scene.add(new window.THREE.HemisphereLight(0xfff1de, 0x3a2a1c, 0.3));
+      const sun = new window.THREE.DirectionalLight(0xfff0dd, 0.25);
+      sun.position.set(6, 12, 8);
       scene.add(sun);
 
       const woodTex = createWoodTexture();
       woodTex.wrapS = woodTex.wrapT = window.THREE.RepeatWrapping;
       woodTex.repeat.set(8, 8);
-      const floorMat = new window.THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.3, metalness: 0.1 });
+      const floorMat = new window.THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.75 });
       const floor = new window.THREE.Mesh(new window.THREE.PlaneGeometry(90, 90), floorMat);
       floor.rotation.x = -Math.PI / 2;
       scene.add(floor);
 
-      const wallTex = createWallTexture();
-      wallTex.wrapS = wallTex.wrapT = window.THREE.RepeatWrapping;
-      wallTex.repeat.set(4, 2);
-      const wallMat = new window.THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.8 });
+      // مطابقة تامة لمادة وطريقة رسم الجدران الموجودة في محرر الإدارة (editor.js)
+      const wallMat = new window.THREE.MeshStandardMaterial({ color: 0xe3ddd3, roughness: 0.85 });
 
-      // مطابقة تامة لرسم الجدران تماماً كما في المحرر
       const activeWalls = (customWalls && customWalls.length > 0)
         ? customWalls
         : ROOM_WALLS.map((w, i) => ({
@@ -211,18 +194,18 @@ export default function Home() {
           }));
 
       activeWalls.forEach((w) => {
-        const wWidth = w.width !== undefined ? w.width : 6;
-        const wHeight = w.height !== undefined ? w.height : 3;
-        const wDepth = w.depth !== undefined ? w.depth : 0.3;
-        const wX = w.x !== undefined ? w.x : 0;
-        const wY = w.y !== undefined ? w.y : 1.5;
-        const wZ = w.z !== undefined ? w.z : 0;
-        const wR = w.r !== undefined ? w.r : 0;
+        const group = new window.THREE.Group();
+        group.position.set(w.x !== undefined ? w.x : 0, w.y !== undefined ? w.y : 1.75, w.z !== undefined ? w.z : 0);
+        group.rotation.y = w.r !== undefined ? w.r : 0;
 
-        const m = new window.THREE.Mesh(new window.THREE.BoxGeometry(wWidth, wHeight, wDepth), wallMat);
-        m.position.set(wX, wY, wZ);
-        m.rotation.y = wR;
-        scene.add(m);
+        const mesh = new window.THREE.Mesh(new window.THREE.BoxGeometry(1, 1, 1), wallMat);
+        mesh.scale.set(
+          w.width !== undefined ? w.width : 6,
+          w.height !== undefined ? w.height : 3.5,
+          w.depth !== undefined ? w.depth : 0.3
+        );
+        group.add(mesh);
+        scene.add(group);
       });
 
       const loader = new window.THREE.TextureLoader();
@@ -305,7 +288,7 @@ export default function Home() {
         }
         state.yaw -= dx * 0.003;
         state.pitch -= dy * 0.003;
-        state.pitch = Math.max(-1, Math.min(1, state.pitch));
+        state.pitch = Math.max(-1.5, Math.min(1.5, state.pitch));
         state.lastMouseX = e.clientX;
         state.lastMouseY = e.clientY;
       }
@@ -368,7 +351,7 @@ export default function Home() {
           if (state.look.a && t.identifier === state.look.id) {
             state.yaw -= (t.clientX - state.look.lx) * 0.0035;
             state.pitch -= (t.clientY - state.look.ly) * 0.0035;
-            state.pitch = Math.max(-1, Math.min(1, state.pitch));
+            state.pitch = Math.max(-1.5, Math.min(1.5, state.pitch));
             state.look.lx = t.clientX;
             state.look.ly = t.clientY;
           }
@@ -477,7 +460,7 @@ export default function Home() {
         camera.rotation.x = state.pitch;
 
         if (!fullscreenOpen && !paused) {
-          const speed = 0.11;
+          const speed = 0.12;
           const forward = new window.THREE.Vector3(-Math.sin(state.yaw), 0, -Math.cos(state.yaw));
           const right = new window.THREE.Vector3(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
 
@@ -495,9 +478,6 @@ export default function Home() {
             if (joyDir.lengthSq() > 0) joyDir.normalize();
             camera.position.addScaledVector(joyDir, 0.05);
           }
-
-          camera.position.x = Math.max(-40, Math.min(40, camera.position.x));
-          camera.position.z = Math.max(-40, Math.min(40, camera.position.z));
 
           let near = null, minDist = Infinity;
           for (const g of hitGroups) {
