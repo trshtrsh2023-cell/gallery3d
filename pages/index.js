@@ -4,7 +4,6 @@ import { DEFAULT_FRAMES, FRAME_STYLE, ROOM_WALLS, normalizeFrames, normalizeWall
 
 const PRESENCE_HEARTBEAT_MS = 20000;
 
-// جلسة دخول الزائر: تُحفظ في المتصفح ٣ ساعات ثم تُزال تلقائياً (سجل الزيارة يبقى في قاعدة البيانات)
 const SESSION_KEY = 'gallery_visitor_session';
 const SESSION_TTL_MS = 3 * 60 * 60 * 1000;
 function readSession() {
@@ -25,8 +24,8 @@ function writeSession(name, prev) {
 function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch (e) {} }
 
 export default function Home() {
-  const [photos, setPhotos] = useState(null);   // null = لم تُحمَّل بعد (مصفوفة فارغة = لا صور بعد، فتظهر كل الإطارات فارغة)
-  const [layout, setLayout] = useState(null);   // تخطيط الإطارات والجدران من /api/layout (null = لم يُحمَّل بعد)
+  const [photos, setPhotos] = useState(null);
+  const [layout, setLayout] = useState(null);
   const [visitorName, setVisitorName] = useState('');
   const [entering, setEntering] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -34,7 +33,7 @@ export default function Home() {
   const [presence, setPresence] = useState({ count: 0, names: [] });
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [autoSession, setAutoSession] = useState(null); // جلسة محفوظة صالحة => دخول تلقائي
+  const [autoSession, setAutoSession] = useState(null);
   const [sessionNotice, setSessionNotice] = useState('');
   const presenceTimerRef = useRef(null);
   const sessionTimerRef = useRef(null);
@@ -136,15 +135,15 @@ export default function Home() {
     function initGallery(activePhotos, layoutData) {
       'use strict';
       const EYE_HEIGHT = 1.5;
-      const SHOW_DIST = 3.5;   // مسافة ظهور لوحة المعلومات الزجاجية
-      const OPEN_DIST = 3.5;   // مسافة السماح بفتح الصورة بالتكبير (مترين)
+      const SHOW_DIST = 3.5;
+      const OPEN_DIST = 3.5;
 
       const frames = layoutData.frames || DEFAULT_FRAMES;
       const customWalls = layoutData.walls;
 
-      const MAT_PADDING = FRAME_STYLE.PAD;       // هامش الإطار حول الصورة
-      const FRAME_DEPTH = FRAME_STYLE.DEPTH;     // سُمك الإطار (نصفه مغروس داخل الجدار)
-      const IMAGE_OFFSET = FRAME_STYLE.IMAGE_OFFSET; // إزاحة الصورة أمام وجه الإطار مباشرة
+      const MAT_PADDING = FRAME_STYLE.PAD;       
+      const FRAME_DEPTH = FRAME_STYLE.DEPTH;     
+      const IMAGE_OFFSET = FRAME_STYLE.IMAGE_OFFSET;
 
       function createWoodTexture() {
         const canvas = document.createElement('canvas');
@@ -177,7 +176,7 @@ export default function Home() {
       const state = {
         yaw: 0, pitch: 0,
         keys: { w: false, s: false, a: false, d: false },
-        joy: { a: false, id: null, cx: 0, cy: 0, dx: 0, dy: 0 },
+        joy: { on: false, x: 0, y: 0, id: null },
         look: { a: false, id: null, lx: 0, ly: 0 },
         mouseLook: false,
         lastMouseX: 0,
@@ -195,7 +194,6 @@ export default function Home() {
       scene = new window.THREE.Scene();
       scene.background = new window.THREE.Color(0x141210);
       
-      // رفع نطاق الرؤية الأقصى (far) إلى 500 لتفادي اختفاء الجدران أو الأسقف السميكة جداً
       camera = new window.THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
       camera.position.set(0, EYE_HEIGHT, 14);
       camera.rotation.order = 'YXZ';
@@ -225,23 +223,14 @@ export default function Home() {
       wallTex.repeat.set(4, 2);
       const wallMat = new window.THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.8 });
 
-      // مصفوفة لحفظ الجدران وتفعيل نظام منع العبور من خلالها (Collision Detection)
       const wallColliders = [];
 
-      // رسم الجدران: الاعتماد على الجدران المخصصة إن وجدت، وإلا فالافتراضية
       const activeWalls = (customWalls && customWalls.length > 0)
         ? customWalls
         : ROOM_WALLS.map((w, i) => ({
             uid: 'w' + (i + 1),
-            width: w[0],
-            height: w[1],
-            depth: w[2],
-            x: w[3],
-            y: w[4],
-            z: w[5],
-            r: w[6] || 0,
-            rx: 0,
-            rz: 0
+            width: w[0], height: w[1], depth: w[2],
+            x: w[3], y: w[4], z: w[5], r: w[6] || 0, rx: 0, rz: 0
           }));
 
       activeWalls.forEach((w) => {
@@ -261,7 +250,7 @@ export default function Home() {
         m.rotation.x = wRx;
         m.rotation.z = wRz;
         scene.add(m);
-        wallColliders.push(m); // حفظ الجدار لفحص الاصطدام ومنع العبور
+        wallColliders.push(m);
       });
 
       const loader = new window.THREE.TextureLoader();
@@ -309,7 +298,6 @@ export default function Home() {
         });
       });
 
-      // --- لوحة المفاتيح ---
       function onKeyDown(e) {
         if (fullscreenOpen || paused) return;
         if (e.code === 'KeyW' || e.code === 'ArrowUp') state.keys.w = true;
@@ -326,7 +314,6 @@ export default function Home() {
       window.addEventListener('keydown', onKeyDown);
       window.addEventListener('keyup', onKeyUp);
 
-      // --- تحكم الماوس ---
       function onMouseDown(e) {
         if (fullscreenOpen || paused) return;
         state.mouseLook = true;
@@ -361,29 +348,54 @@ export default function Home() {
       window.addEventListener('mousemove', onMouseMove);
       window.addEventListener('mouseup', onMouseUp);
 
-      // --- تحكم اللمس (الجوالات) ---
-      const joyZone = document.getElementById('joyZone');
-      const joyKnob = document.getElementById('joyKnob');
+      // --- منطق الجويستيك المطابق للمحرر (Editor) بدقة ---
+      const baseEl = document.getElementById('joyZone');
+      const knobEl = document.getElementById('joyKnob');
+
+      const setJoy = (cx, cy, r) => {
+        const dx = cx - r.left - r.width / 2;
+        const dy = cy - r.top - r.height / 2;
+        const max = r.width / 2 - 10;
+        const d = Math.hypot(dx, dy) || 1;
+        const k = Math.min(1, d / max);
+        state.joy.x = (dx / d) * k;
+        state.joy.y = (dy / d) * k;
+        if (knobEl) knobEl.style.transform = 'translate(' + (state.joy.x * max) + 'px,' + (state.joy.y * max) + 'px)';
+      };
+
+      const joyEnd = () => {
+        state.joy.on = false;
+        state.joy.x = 0;
+        state.joy.y = 0;
+        state.joy.id = null;
+        if (knobEl) knobEl.style.transform = 'translate(0,0)';
+      };
+
+      if (baseEl) {
+        baseEl.addEventListener('touchstart', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          const t = e.changedTouches[0];
+          state.joy.on = true;
+          state.joy.id = t.identifier;
+          setJoy(t.clientX, t.clientY, baseEl.getBoundingClientRect());
+        }, { passive: false });
+
+        baseEl.addEventListener('touchmove', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          for (const t of e.changedTouches) {
+            if (t.identifier === state.joy.id) setJoy(t.clientX, t.clientY, baseEl.getBoundingClientRect());
+          }
+        }, { passive: false });
+
+        baseEl.addEventListener('touchend', (e) => { e.preventDefault(); e.stopPropagation(); joyEnd(); }, { passive: false });
+        baseEl.addEventListener('touchcancel', joyEnd, { passive: false });
+      }
 
       function onTouchStart(e) {
         if (fullscreenOpen || paused) return;
         for (const t of e.changedTouches) {
-          let isNearJoystick = false;
-          let r = null;
-          if (joyZone) {
-            r = joyZone.getBoundingClientRect();
-            const pad = 34;
-            isNearJoystick = t.clientX >= r.left - pad && t.clientX <= r.right + pad &&
-              t.clientY >= r.top - pad && t.clientY <= r.bottom + pad;
-          }
-          if (isNearJoystick && !state.joy.a) {
-            state.joy.a = true;
-            state.joy.id = t.identifier;
-            if (r) {
-              state.joy.cx = r.left + r.width / 2;
-              state.joy.cy = r.top + r.height / 2;
-            }
-          } else if (!state.look.a) {
+          if (state.joy.on && t.identifier === state.joy.id) continue;
+          if (!state.look.a) {
             state.look.a = true;
             state.look.id = t.identifier;
             state.look.lx = t.clientX;
@@ -392,21 +404,11 @@ export default function Home() {
           state.tap[t.identifier] = { x: t.clientX, y: t.clientY, moved: false };
         }
       }
+
       function onTouchMove(e) {
         for (const t of e.changedTouches) {
           const tp = state.tap[t.identifier];
           if (tp && Math.hypot(t.clientX - tp.x, t.clientY - tp.y) > 8) tp.moved = true;
-          if (state.joy.a && t.identifier === state.joy.id) {
-            let dx = t.clientX - state.joy.cx, dy = t.clientY - state.joy.cy;
-            const max = 40, len = Math.hypot(dx, dy);
-            if (len > max) { dx = dx / len * max; dy = dy / len * max; }
-            state.joy.dx = dx / max;
-            state.joy.dy = dy / max;
-            if (joyKnob) {
-              joyKnob.style.left = (31 + dx) + 'px';
-              joyKnob.style.top = (31 + dy) + 'px';
-            }
-          }
           if (state.look.a && t.identifier === state.look.id) {
             state.yaw -= (t.clientX - state.look.lx) * 0.0035;
             state.pitch -= (t.clientY - state.look.ly) * 0.0035;
@@ -416,6 +418,7 @@ export default function Home() {
           }
         }
       }
+
       function onTouchEnd(e) {
         for (const t of e.changedTouches) {
           const tp = state.tap[t.identifier];
@@ -423,17 +426,10 @@ export default function Home() {
             triggerRaycast(t.clientX, t.clientY);
           }
           delete state.tap[t.identifier];
-          if (state.joy.a && t.identifier === state.joy.id) {
-            state.joy.a = false;
-            state.joy.dx = 0; state.joy.dy = 0;
-            if (joyKnob) {
-              joyKnob.style.left = '31px';
-              joyKnob.style.top = '31px';
-            }
-          }
           if (state.look.a && t.identifier === state.look.id) state.look.a = false;
         }
       }
+
       renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: true });
       renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: true });
       renderer.domElement.addEventListener('touchend', onTouchEnd);
@@ -505,12 +501,16 @@ export default function Home() {
       function onGalleryPause() {
         paused = true;
         state.keys.w = state.keys.s = state.keys.a = state.keys.d = false;
-        state.joy.a = false; state.joy.dx = 0; state.joy.dy = 0;
+        joyEnd();
         state.mouseLook = false;
       }
       function onGalleryResume() { paused = false; }
       window.addEventListener('gallery:pause', onGalleryPause);
       window.addEventListener('gallery:resume', onGalleryResume);
+
+      const fwd = new window.THREE.Vector3();
+      const right = new window.THREE.Vector3();
+      const mv = new window.THREE.Vector3();
 
       function animate() {
         rafId = requestAnimationFrame(animate);
@@ -520,30 +520,27 @@ export default function Home() {
 
         if (!fullscreenOpen && !paused) {
           const speed = 0.11;
-          const forward = new window.THREE.Vector3(-Math.sin(state.yaw), 0, -Math.cos(state.yaw));
-          const right = new window.THREE.Vector3(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
-
-          // 1. حفظ الموقع القديم للزائر قبل التحرك
           const oldPos = camera.position.clone();
 
-          let displacement = new window.THREE.Vector3(0, 0, 0);
-          let hasKeyMove = false;
-          if (state.keys.w) { displacement.addScaledVector(forward, speed); hasKeyMove = true; }
-          if (state.keys.s) { displacement.addScaledVector(forward, -speed); hasKeyMove = true; }
-          if (state.keys.a) { displacement.addScaledVector(right, -speed); hasKeyMove = true; }
-          if (state.keys.d) { displacement.addScaledVector(right, speed); hasKeyMove = true; }
-          if (hasKeyMove) camera.position.add(displacement);
+          fwd.set(-Math.sin(state.yaw), 0, -Math.cos(state.yaw));
+          right.set(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
+          mv.set(0, 0, 0);
 
-          if (state.joy.a) {
-            const joyDir = new window.THREE.Vector3(state.joy.dx, 0, state.joy.dy).applyQuaternion(camera.quaternion);
-            joyDir.y = 0;
-            if (joyDir.lengthSq() > 0) joyDir.normalize();
-            camera.position.addScaledVector(joyDir, 0.05);
+          if (state.keys.w) mv.addScaledVector(fwd, speed);
+          if (state.keys.s) mv.addScaledVector(fwd, -speed);
+          if (state.keys.a) mv.addScaledVector(right, -speed);
+          if (state.keys.d) mv.addScaledVector(right, speed);
+
+          // حسابات حركة الجويستيك المطابقة للمحرر تماماً
+          if (state.joy.on) {
+            mv.addScaledVector(fwd, -state.joy.y * speed);
+            mv.addScaledVector(right, state.joy.x * speed);
           }
 
-          // 2. نظام منع العبور من خلال الجدران (Collision Detection)
+          if (mv.lengthSq() > 0) camera.position.add(mv);
+
           let collided = false;
-          const playerRadius = 0.35; // مسافة أمان حول الزائر لمنع الالتصاق المباشر
+          const playerRadius = 0.35;
 
           for (const wallMesh of wallColliders) {
             const box = new window.THREE.Box3().setFromObject(wallMesh);
@@ -556,7 +553,6 @@ export default function Home() {
             }
           }
 
-          // إذا حاول الزائر اختراق الجدار، يتم إرجاعه فوراً لموقعه السابق
           if (collided) {
             camera.position.copy(oldPos);
           }
@@ -638,7 +634,6 @@ export default function Home() {
       clearInterval(presenceTimerRef.current);
       presenceTimerRef.current = null;
     }
-    // نُبلغ الخادم بالمغادرة فوراً حتى لا يبقى الزائر "متواجداً" بعد خروجه
     fetch('/api/presence', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -661,7 +656,6 @@ export default function Home() {
     }
   }
 
-  // انتهاء جلسة الـ٣ ساعات: تُزال بيانات الدخول من المتصفح ويعود الزائر للصفحة الرئيسية
   function expireSession() {
     clearSession();
     if (sessionTimerRef.current) { clearTimeout(sessionTimerRef.current); sessionTimerRef.current = null; }
@@ -673,14 +667,12 @@ export default function Home() {
     setSessionNotice('انتهت جلسة دخولك (٣ ساعات). أدخل اسمك للمتابعة.');
   }
 
-  // auto = دخول تلقائي بجلسة محفوظة (لا يُسجَّل كزيارة جديدة)
   async function doEnter(name, auto) {
     setEntering(true);
     setSessionNotice('');
     const prev = readSession();
     const sameSession = prev && prev.name === name ? prev : null;
     if (!sameSession) {
-      // دخول جديد => يُسجَّل في سجل الزوار مرة واحدة طوال مدة الجلسة
       try {
         let model = null;
         try {
@@ -721,13 +713,11 @@ export default function Home() {
     await doEnter(name, false);
   }
 
-  // الدخول التلقائي عند وجود جلسة محفوظة صالحة
   useEffect(() => {
     if (autoSession) doEnter(autoSession.name, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSession]);
 
-  // تسجيل خروج الزائر: يمسح الجلسة المحفوظة ويعيده لصفحة إدخال الاسم
   function handleVisitorLogout() {
     setMenuOpen(false);
     clearSession();
@@ -807,7 +797,7 @@ export default function Home() {
         }
         #tooFarToast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 
-        #entryNameInput { width: 100%; box-sizing: border-box; padding: 14px; margin-bottom: 14px; border-radius: 9px; border: 1px solid rgba(201,163,91,.22); background: rgba(0,0,0,.32); color: #f3efe8; font-size: 15.5px; outline: none; text-align: center; font-family: inherit; transition: border-color .2s ease; }
+        #entryNameInput { width: 100%; padding: 13px 16px; margin-bottom: 14px; border-radius: 10px; border: 1px solid rgba(201,163,91,.22); background: rgba(0,0,0,.32); color: #f3efe8; font-size: 14px; outline: none; text-align: center; font-family: inherit; transition: border-color .2s ease; }
         #entryNameInput:focus { border-color: rgba(201,163,91,.65); }
         #entryNameInput::placeholder { color: #776f62; }
 
@@ -835,7 +825,6 @@ export default function Home() {
         .menu-item:hover { background: rgba(255,255,255,.06); }
         .menu-item svg { flex-shrink: 0; color: #c9a35b; }
         .menu-sep { height: 1px; background: rgba(255,255,255,.08); margin: 5px 4px; }
-        .menu-static { padding: 8px 12px; font-size: 11px; color: #7d7568; line-height: 1.7; }
 
         #presencePanel, #creditsPanel {
           position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(.95); z-index: 1300;
@@ -977,9 +966,10 @@ export default function Home() {
         </div>
       </div>
 
-      <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, pointerEvents: 'none', display: 'none', opacity: 0.3 }}>
-        <div id="joyZone" style={{ width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(30, 25, 20, .42)', border: '1px solid rgba(255, 255, 255, .32)', position: 'relative', touchAction: 'none', pointerEvents: 'none' }}>
-          <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .95)', position: 'absolute', top: '31px', left: '31px', pointerEvents: 'none' }}></div>
+      {/* عصا التحكم (الجويستيك) متطابقة تماماً لشكل وحجم ولون المحرر (Editor) باللون الأزرق */}
+      <div id="joyWrap" style={{ position: 'fixed', left: '18px', bottom: '18px', zIndex: 1000, display: 'none', touchAction: 'none' }}>
+        <div id="joyZone" style={{ width: '116px', height: '116px', borderRadius: '50%', background: 'rgba(15,23,42,.55)', border: '1.5px solid rgba(255,255,255,.35)', position: 'relative', touchAction: 'none' }}>
+          <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(56,189,248,.9)', position: 'absolute', top: '34px', left: '34px', pointerEvents: 'none', transition: 'transform 0.05s linear' }}></div>
         </div>
       </div>
 
