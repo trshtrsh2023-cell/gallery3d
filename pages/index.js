@@ -114,8 +114,6 @@ export default function Home() {
       const frames = layoutData.frames || DEFAULT_FRAMES;
       const customWalls = layoutData.walls;
 
-      const MAX_FRAME_W = FRAME_STYLE.MAX_W;
-      const MAX_FRAME_H = FRAME_STYLE.MAX_H;
       const MAT_PADDING = FRAME_STYLE.PAD;       // هامش الإطار حول الصورة
       const FRAME_DEPTH = FRAME_STYLE.DEPTH;     // سُمك الإطار (نصفه مغروس داخل الجدار)
       const IMAGE_OFFSET = FRAME_STYLE.IMAGE_OFFSET; // إزاحة الصورة أمام وجه الإطار مباشرة
@@ -168,7 +166,9 @@ export default function Home() {
 
       scene = new window.THREE.Scene();
       scene.background = new window.THREE.Color(0x141210);
-      camera = new window.THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+      
+      // رفع نطاق الرؤية الأقصى (far) إلى 500 لتفادي اختفاء الجدران أو الأسقف السميكة جداً
+      camera = new window.THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
       camera.position.set(0, EYE_HEIGHT, 14);
       camera.rotation.order = 'YXZ';
 
@@ -197,6 +197,9 @@ export default function Home() {
       wallTex.repeat.set(4, 2);
       const wallMat = new window.THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.8 });
 
+      // مصفوفة لحفظ الجدران وتفعيل نظام منع العبور من خلالها (Collision Detection)
+      const wallColliders = [];
+
       // رسم الجدران: الاعتماد على الجدران المخصصة إن وجدت، وإلا فالافتراضية
       const activeWalls = (customWalls && customWalls.length > 0)
         ? customWalls
@@ -208,7 +211,9 @@ export default function Home() {
             x: w[3],
             y: w[4],
             z: w[5],
-            r: w[6] || 0
+            r: w[6] || 0,
+            rx: 0,
+            rz: 0
           }));
 
       activeWalls.forEach((w) => {
@@ -219,11 +224,16 @@ export default function Home() {
         const wY = w.y !== undefined ? w.y : 1.5;
         const wZ = w.z !== undefined ? w.z : 0;
         const wR = w.r !== undefined ? w.r : 0;
+        const wRx = w.rx !== undefined ? w.rx : 0;
+        const wRz = w.rz !== undefined ? w.rz : 0;
 
         const m = new window.THREE.Mesh(new window.THREE.BoxGeometry(wWidth, wHeight, wDepth), wallMat);
         m.position.set(wX, wY, wZ);
         m.rotation.y = wR;
+        m.rotation.x = wRx;
+        m.rotation.z = wRz;
         scene.add(m);
+        wallColliders.push(m); // حفظ الجدار لفحص الاصطدام ومنع العبور
       });
 
       const loader = new window.THREE.TextureLoader();
@@ -485,6 +495,9 @@ export default function Home() {
           const forward = new window.THREE.Vector3(-Math.sin(state.yaw), 0, -Math.cos(state.yaw));
           const right = new window.THREE.Vector3(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
 
+          // 1. حفظ الموقع القديم للزائر قبل التحرك
+          const oldPos = camera.position.clone();
+
           let displacement = new window.THREE.Vector3(0, 0, 0);
           let hasKeyMove = false;
           if (state.keys.w) { displacement.addScaledVector(forward, speed); hasKeyMove = true; }
@@ -500,8 +513,28 @@ export default function Home() {
             camera.position.addScaledVector(joyDir, 0.05);
           }
 
-          camera.position.x = Math.max(-9, Math.min(9, camera.position.x));
-          camera.position.z = Math.max(-14, Math.min(14, camera.position.z));
+          // 2. نظام منع العبور من خلال الجدران (Collision Detection)
+          let collided = false;
+          const playerRadius = 0.35; // مسافة أمان حول الزائر لمنع الالتصاق المباشر
+
+          for (const wallMesh of wallColliders) {
+            const box = new window.THREE.Box3().setFromObject(wallMesh);
+            const expandedBox = box.clone();
+            expandedBox.expandByScalar(playerRadius);
+
+            if (expandedBox.containsPoint(camera.position)) {
+              collided = true;
+              break;
+            }
+          }
+
+          // إذا حاول الزائر اختراق الجدار، يتم إرجاعه فوراً لموقعه السابق
+          if (collided) {
+            camera.position.copy(oldPos);
+          }
+
+          camera.position.x = Math.max(-25, Math.min(25, camera.position.x));
+          camera.position.z = Math.max(-25, Math.min(25, camera.position.z));
 
           let near = null, minDist = Infinity;
           for (const g of hitGroups) {
