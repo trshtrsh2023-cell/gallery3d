@@ -44,6 +44,7 @@ export default function Home() {
         useDefaultPhotos();
       });
 
+    // جلب التخطيط والجدران المخصصة من الخادم تماماً مثل المحرر
     fetch('/api/layout')
       .then((r) => r.json())
       .then((d) => {
@@ -114,8 +115,6 @@ export default function Home() {
       const frames = layoutData.frames || DEFAULT_FRAMES;
       const customWalls = layoutData.walls;
 
-      const MAX_FRAME_W = FRAME_STYLE.MAX_W;
-      const MAX_FRAME_H = FRAME_STYLE.MAX_H;
       const MAT_PADDING = FRAME_STYLE.PAD;       
       const FRAME_DEPTH = FRAME_STYLE.DEPTH;     
       const IMAGE_OFFSET = FRAME_STYLE.IMAGE_OFFSET; 
@@ -188,7 +187,7 @@ export default function Home() {
       woodTex.wrapS = woodTex.wrapT = window.THREE.RepeatWrapping;
       woodTex.repeat.set(8, 8);
       const floorMat = new window.THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.3, metalness: 0.1 });
-      const floor = new window.THREE.Mesh(new window.THREE.PlaneGeometry(50, 50), floorMat);
+      const floor = new window.THREE.Mesh(new window.THREE.PlaneGeometry(90, 90), floorMat);
       floor.rotation.x = -Math.PI / 2;
       scene.add(floor);
 
@@ -197,6 +196,7 @@ export default function Home() {
       wallTex.repeat.set(4, 2);
       const wallMat = new window.THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.8 });
 
+      // مطابقة تامة لرسم الجدران تماماً كما في المحرر
       const activeWalls = (customWalls && customWalls.length > 0)
         ? customWalls
         : ROOM_WALLS.map((w, i) => ({
@@ -211,13 +211,13 @@ export default function Home() {
           }));
 
       activeWalls.forEach((w) => {
-        const wWidth = w.width !== undefined ? w.width : w[0];
-        const wHeight = w.height !== undefined ? w.height : w[1];
-        const wDepth = w.depth !== undefined ? w.depth : w[2];
-        const wX = w.x !== undefined ? w.x : w[3];
-        const wY = w.y !== undefined ? w.y : w[4];
-        const wZ = w.z !== undefined ? w.z : w[5];
-        const wR = w.r !== undefined ? w.r : (w[6] || 0);
+        const wWidth = w.width !== undefined ? w.width : 6;
+        const wHeight = w.height !== undefined ? w.height : 3;
+        const wDepth = w.depth !== undefined ? w.depth : 0.3;
+        const wX = w.x !== undefined ? w.x : 0;
+        const wY = w.y !== undefined ? w.y : 1.5;
+        const wZ = w.z !== undefined ? w.z : 0;
+        const wR = w.r !== undefined ? w.r : 0;
 
         const m = new window.THREE.Mesh(new window.THREE.BoxGeometry(wWidth, wHeight, wDepth), wallMat);
         m.position.set(wX, wY, wZ);
@@ -496,8 +496,8 @@ export default function Home() {
             camera.position.addScaledVector(joyDir, 0.05);
           }
 
-          camera.position.x = Math.max(-9, Math.min(9, camera.position.x));
-          camera.position.z = Math.max(-14, Math.min(14, camera.position.z));
+          camera.position.x = Math.max(-40, Math.min(40, camera.position.x));
+          camera.position.z = Math.max(-40, Math.min(40, camera.position.z));
 
           let near = null, minDist = Infinity;
           for (const g of hitGroups) {
