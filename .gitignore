@@ -3,3 +3,8 @@ node_modules/
 out/
 build/
 .env*.local
+claude/editor.js.old
+claude/galleryLayout.js.old
+claude/index.js.old
+claude/layout.js.cloaude
+gallery3d-v11.zip

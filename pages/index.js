@@ -807,7 +807,7 @@ export default function Home() {
         }
         #tooFarToast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 
-        #entryNameInput { width: 100%; padding: 13px 16px; margin-bottom: 14px; border-radius: 10px; border: 1px solid rgba(201,163,91,.22); background: rgba(0,0,0,.32); color: #f3efe8; font-size: 14px; outline: none; text-align: center; font-family: inherit; transition: border-color .2s ease; }
+        #entryNameInput { width: 100%; box-sizing: border-box; padding: 14px; margin-bottom: 14px; border-radius: 9px; border: 1px solid rgba(201,163,91,.22); background: rgba(0,0,0,.32); color: #f3efe8; font-size: 15.5px; outline: none; text-align: center; font-family: inherit; transition: border-color .2s ease; }
         #entryNameInput:focus { border-color: rgba(201,163,91,.65); }
         #entryNameInput::placeholder { color: #776f62; }
 
@@ -977,8 +977,8 @@ export default function Home() {
         </div>
       </div>
 
-      <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, display: 'none', opacity: 0.3 }}>
-        <div id="joyZone" style={{ width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(30, 25, 20, .42)', border: '1px solid rgba(255, 255, 255, .32)', position: 'relative', touchAction: 'none' }}>
+      <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, pointerEvents: 'none', display: 'none', opacity: 0.3 }}>
+        <div id="joyZone" style={{ width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(30, 25, 20, .42)', border: '1px solid rgba(255, 255, 255, .32)', position: 'relative', touchAction: 'none', pointerEvents: 'none' }}>
           <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .95)', position: 'absolute', top: '31px', left: '31px', pointerEvents: 'none' }}></div>
         </div>
       </div>
