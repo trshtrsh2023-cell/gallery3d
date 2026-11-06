@@ -177,7 +177,7 @@ export default function Home() {
       floor.rotation.x = -Math.PI / 2;
       scene.add(floor);
 
-      // مطابقة تامة لمادة وطريقة رسم الجدران الموجودة في محرر الإدارة (editor.js)
+      // مطابقة تامة لهيكلية الخامات والجدران في محرر الإدارة (editor.js)
       const wallMat = new window.THREE.MeshStandardMaterial({ color: 0xe3ddd3, roughness: 0.85 });
 
       const activeWalls = (customWalls && customWalls.length > 0)
@@ -195,7 +195,11 @@ export default function Home() {
 
       activeWalls.forEach((w) => {
         const group = new window.THREE.Group();
-        group.position.set(w.x !== undefined ? w.x : 0, w.y !== undefined ? w.y : 1.75, w.z !== undefined ? w.z : 0);
+        group.position.set(
+          w.x !== undefined ? w.x : 0,
+          w.y !== undefined ? w.y : 1.75,
+          w.z !== undefined ? w.z : 0
+        );
         group.rotation.y = w.r !== undefined ? w.r : 0;
 
         const mesh = new window.THREE.Mesh(new window.THREE.BoxGeometry(1, 1, 1), wallMat);
