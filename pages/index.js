@@ -135,10 +135,15 @@ export default function Home() {
     function initGallery(activePhotos, layoutData) {
       'use strict';
       const EYE_HEIGHT = 1.5;
+      const SHOW_DIST = 3.5;
+      const OPEN_DIST = 3.5;
 
       const frames = layoutData.frames || DEFAULT_FRAMES;
       const customWalls = layoutData.walls;
 
+      const MAT_PADDING = FRAME_STYLE.PAD;       
+      const FRAME_DEPTH = FRAME_STYLE.DEPTH;     
+      const IMAGE_OFFSET = FRAME_STYLE.IMAGE_OFFSET;
 
       function createWoodTexture() {
         const canvas = document.createElement('canvas');
@@ -189,7 +194,6 @@ export default function Home() {
       scene = new window.THREE.Scene();
       scene.background = new window.THREE.Color(0x141210);
       
-      // رفع نطاق الرؤية الأقصى (far) إلى 500 لتفادي اختفاء الجدران أو الأسقف السميكة جداً
       camera = new window.THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
       camera.position.set(0, EYE_HEIGHT, 14);
       camera.rotation.order = 'YXZ';
@@ -219,10 +223,8 @@ export default function Home() {
       wallTex.repeat.set(4, 2);
       const wallMat = new window.THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.8 });
 
-      // مصفوفة لحفظ الجدران وتفعيل نظام منع العبور من خلالها (Collision Detection)
       const wallColliders = [];
 
-      // رسم الجدران: الاعتماد على الجدران المخصصة إن وجدت، وإلا فالافتراضية
       const activeWalls = (customWalls && customWalls.length > 0)
         ? customWalls
         : ROOM_WALLS.map((w, i) => ({
