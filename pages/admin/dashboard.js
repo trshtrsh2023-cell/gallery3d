@@ -122,9 +122,14 @@ export default function AdminDashboard() {
   const [chatMissing, setChatMissing] = useState(false);
   const [chatEdit, setChatEdit] = useState(null); // { id, text }
   const [chatQ, setChatQ] = useState('');
+  const [chatFilter, setChatFilter] = useState('all');
+  // الأعضاء
+  const [members, setMembers] = useState([]);
+  const [membersMissing, setMembersMissing] = useState(false);
+  const [memberQ, setMemberQ] = useState('');
 
   // الإداريون
-  const [adminForm, setAdminForm] = useState({ username: '', password: '' });
+  const [adminForm, setAdminForm] = useState({ username: '', email: '', password: '' });
 
   const showToast = useCallback((msg, kind = 'ok') => {
     setToast({ msg, kind, id: Date.now() });
@@ -135,6 +140,7 @@ export default function AdminDashboard() {
   const loadPhotos = useCallback(() => fetch('/api/admin/photos').then((r) => r.json()).then((d) => { setPhotos(Array.isArray(d) ? d : []); setLoaded((l) => ({ ...l, photos: true })); }).catch(() => {}), []);
   const loadVisits = useCallback(() => fetch('/api/visits').then((r) => r.json()).then((d) => { setVisits(Array.isArray(d) ? d : []); setLoaded((l) => ({ ...l, visits: true })); }).catch(() => {}), []);
   const loadChat = useCallback(() => fetch('/api/admin/chat', { cache: 'no-store' }).then((r) => r.json()).then((d) => { setChatRows(Array.isArray(d.rows) ? d.rows : []); setChatMissing(!!d.missing); }).catch(() => {}), []);
+  const loadMembers = useCallback(() => fetch('/api/admin/members', { cache: 'no-store' }).then((r) => r.json()).then((d) => { setMembers(Array.isArray(d.rows) ? d.rows : []); setMembersMissing(!!d.missing); }).catch(() => {}), []);
   const chatCall = async (method, body, okMsg) => {
     try {
       const r = await fetch('/api/admin/chat', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -343,10 +349,11 @@ export default function AdminDashboard() {
     { id: 'photos', label: 'اللوحات', icon: 'image', badge: photos.length },
     { id: 'visits', label: 'الزوار والأجهزة', icon: 'users', badge: visits.length },
     { id: 'logs', label: 'سجل النشاط', icon: 'list', badge: logs.length },
-    { id: 'chat', label: 'سجل الدردشة', icon: 'list', badge: chatRows.length },
+    { id: 'chat', label: 'سجل الدردشة', icon: 'list', badge: chatRows.filter((m) => m.status === 'pending' && !m.deleted).length || chatRows.length },
+    { id: 'members', label: 'الأعضاء', icon: 'users', badge: members.length },
     { id: 'admins', label: 'الإداريون', icon: 'shield' }
   ];
-  const titles = { overview: 'نظرة عامة', photos: 'إدارة اللوحات', visits: 'الزوار والأجهزة', logs: 'سجل نشاط الإداريين', chat: 'سجل الدردشة', admins: 'الإداريون' };
+  const titles = { overview: 'نظرة عامة', photos: 'إدارة اللوحات', visits: 'الزوار والأجهزة', logs: 'سجل نشاط الإداريين', chat: 'سجل الدردشة', members: 'الأعضاء المسجّلون', admins: 'الإداريون' };
 
   return (
     <div className="d-app" dir="rtl">
@@ -364,7 +371,7 @@ export default function AdminDashboard() {
         </div>
         <nav>
           {NAV.map((n) => (
-            <button key={n.id} className={'d-nav' + (tab === n.id ? ' on' : '')} onClick={() => { setTab(n.id); setNavOpen(false); if (n.id === 'logs') loadLogs(); if (n.id === 'chat') loadChat(); }}>
+            <button key={n.id} className={'d-nav' + (tab === n.id ? ' on' : '')} onClick={() => { setTab(n.id); setNavOpen(false); if (n.id === 'logs') loadLogs(); if (n.id === 'chat') loadChat(); if (n.id === 'members') loadMembers(); }}>
               <Icon name={n.icon} /> <span>{n.label}</span>
               {n.badge !== undefined && <em>{n.badge}</em>}
             </button>
@@ -667,47 +674,105 @@ export default function AdminDashboard() {
 
           {tab === 'chat' && (
             <>
-              {chatMissing && <div className="d-note warnbox">جدول الدردشة غير موجود بعد — نفّذ ملف <b>supabase_update_v11.sql</b> في Supabase SQL Editor.</div>}
+              {chatMissing && <div className="d-note warnbox">جدول الدردشة غير موجود أو ناقص الأعمدة — نفّذ ملف <b>supabase_update_v11.sql</b> في Supabase SQL Editor.</div>}
               <div className="d-toolbar">
                 <label className="d-search"><Icon name="search" size={16} /><input placeholder="بحث في الاسم أو الرسالة…" value={chatQ} onChange={(e) => setChatQ(e.target.value)} /></label>
+                <select value={chatFilter} onChange={(e) => setChatFilter(e.target.value)}>
+                  <option value="all">كل الرسائل</option>
+                  <option value="pending">بانتظار الموافقة</option>
+                  <option value="approved">المعتمدة</option>
+                  <option value="rejected">المرفوضة</option>
+                  <option value="deleted">المحذوفة</option>
+                </select>
                 <button className="d-btn" onClick={loadChat}>تحديث</button>
-                <button className="d-btn" disabled={!chatRows.length} onClick={() => { if (confirm('مسح كل رسائل الدردشة الحالية؟')) chatCall('DELETE', { all: true }); }}>مسح الكل</button>
               </div>
               <section className="d-panel flush">
                 <div className="d-tablewrap">
                   <table className="d-table logs">
-                    <thead><tr><th>الوقت</th><th>الاسم</th><th>الرسالة</th><th>إجراء</th></tr></thead>
+                    <thead><tr><th>الوقت</th><th>الاسم</th><th>الرسالة</th><th>الحالة</th><th>إجراء</th></tr></thead>
                     <tbody>
-                      {chatRows.filter((m) => !chatQ.trim() || (m.name + ' ' + m.message).includes(chatQ.trim())).map((m) => (
+                      {chatRows.filter((m) => {
+                        if (chatQ.trim() && !(m.name + ' ' + m.message).includes(chatQ.trim())) return false;
+                        if (chatFilter === 'deleted') return m.deleted;
+                        if (chatFilter === 'all') return true;
+                        return m.status === chatFilter && !m.deleted;
+                      }).map((m) => {
+                        const editing = chatEdit && chatEdit.id === m.id;
+                        const rowStyle = m.deleted ? { background: 'rgba(229,72,77,.12)', color: '#ff8a8a' } : undefined;
+                        const roleTxt = m.role === 'admin' ? 'إداري' : m.role === 'member' ? 'عضو' : 'زائر';
+                        const stTxt = m.deleted ? 'محذوفة' : m.status === 'pending' ? 'بانتظار الموافقة' : m.status === 'rejected' ? 'مرفوضة' : 'معتمدة';
+                        return (
+                          <tr key={m.id} style={rowStyle}>
+                            <td>{fmtDateTime(m.created_at)}</td>
+                            <td><b>{m.name}</b> <small style={{ opacity: 0.7 }}>({roleTxt})</small></td>
+                            <td style={{ maxWidth: 420, wordBreak: 'break-word' }}>
+                              {editing ? (
+                                <input style={{ width: '100%' }} maxLength={280} value={chatEdit.text} onChange={(e) => setChatEdit({ id: m.id, text: e.target.value })} autoFocus />
+                              ) : (
+                                <span style={m.deleted ? { textDecoration: 'line-through' } : undefined}>{m.message}</span>
+                              )}
+                              {m.original_message && !editing && <div style={{ fontSize: 11, opacity: 0.7 }}>✎ مُعدَّلة — الأصل: «{m.original_message}»</div>}
+                              {m.deleted && <div style={{ fontSize: 11, color: '#ff6b6b', fontWeight: 700 }}>محذوفة{m.deleted_by ? ' بواسطة ' + m.deleted_by : ''} — {m.deleted_at ? fmtDateTime(m.deleted_at) : ''}</div>}
+                            </td>
+                            <td style={{ whiteSpace: 'nowrap', color: m.deleted ? '#ff6b6b' : m.status === 'pending' ? '#f0b13c' : m.status === 'rejected' ? '#ff8a8a' : undefined, fontWeight: m.deleted || m.status === 'pending' ? 700 : 400 }}>{stTxt}</td>
+                            <td style={{ whiteSpace: 'nowrap' }}>
+                              {editing ? (
+                                <>
+                                  <button className="d-link" onClick={async () => { if (await chatCall('PUT', { id: m.id, message: chatEdit.text })) setChatEdit(null); }}>حفظ</button>{' · '}
+                                  <button className="d-link" onClick={() => setChatEdit(null)}>إلغاء</button>
+                                </>
+                              ) : m.deleted ? (
+                                <button className="d-link" onClick={() => chatCall('PATCH', { id: m.id, action: 'restore' })}>استعادة</button>
+                              ) : (
+                                <>
+                                  {m.status !== 'approved' && <><button className="d-link" onClick={() => chatCall('PATCH', { id: m.id, action: 'approve' })}>موافقة</button>{' · '}</>}
+                                  {m.status === 'pending' && <><button className="d-link" onClick={() => chatCall('PATCH', { id: m.id, action: 'reject' })}>رفض</button>{' · '}</>}
+                                  <button className="d-link" onClick={() => setChatEdit({ id: m.id, text: m.message })}>تعديل</button>{' · '}
+                                  <button className="d-link" onClick={() => { if (confirm('حذف هذه الرسالة؟ (تبقى في السجل باللون الأحمر)')) chatCall('DELETE', { id: m.id }); }}>حذف</button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {chatRows.length === 0 && <p className="d-empty pad">لا توجد رسائل بعد.</p>}
+                </div>
+              </section>
+              <p className="d-note">السجل دائم: لا تُحذف أي رسالة فعلياً. رسائل الزوار تظهر في المعرض بعد موافقتك، ورسائل الأعضاء والإداريين تظهر مباشرة. المحذوفة تبقى هنا بالأحمر ويمكن استعادتها.</p>
+            </>
+          )}
+
+          {tab === 'members' && (
+            <>
+              {membersMissing && <div className="d-note warnbox">جدول الأعضاء غير موجود — نفّذ ملف <b>supabase_update_v11.sql</b>.</div>}
+              <div className="d-toolbar">
+                <label className="d-search"><Icon name="search" size={16} /><input placeholder="بحث بالاسم أو البريد…" value={memberQ} onChange={(e) => setMemberQ(e.target.value)} /></label>
+                <button className="d-btn" onClick={loadMembers}>تحديث</button>
+              </div>
+              <section className="d-panel flush">
+                <div className="d-tablewrap">
+                  <table className="d-table logs">
+                    <thead><tr><th>الاسم الثلاثي</th><th>اسم المستخدم</th><th>البريد</th><th>الصلاحية</th><th>التسجيل</th><th>آخر دخول</th><th></th></tr></thead>
+                    <tbody>
+                      {members.filter((m) => !memberQ.trim() || (m.full_name + ' ' + m.username + ' ' + m.email).toLowerCase().includes(memberQ.trim().toLowerCase())).map((m) => (
                         <tr key={m.id}>
+                          <td><b>{m.full_name}</b>{m.google && <small style={{ opacity: 0.7 }}> · Google</small>}</td>
+                          <td dir="ltr">{m.username}</td>
+                          <td dir="ltr">{m.email}</td>
+                          <td>عضو</td>
                           <td>{fmtDateTime(m.created_at)}</td>
-                          <td><b>{m.name}</b></td>
-                          <td style={{ maxWidth: 420, wordBreak: 'break-word' }}>
-                            {chatEdit && chatEdit.id === m.id ? (
-                              <input style={{ width: '100%' }} maxLength={280} value={chatEdit.text} onChange={(e) => setChatEdit({ id: m.id, text: e.target.value })} autoFocus />
-                            ) : m.message}
-                          </td>
-                          <td style={{ whiteSpace: 'nowrap' }}>
-                            {chatEdit && chatEdit.id === m.id ? (
-                              <>
-                                <button className="d-link" onClick={async () => { if (await chatCall('PUT', { id: m.id, message: chatEdit.text })) setChatEdit(null); }}>حفظ</button>{' · '}
-                                <button className="d-link" onClick={() => setChatEdit(null)}>إلغاء</button>
-                              </>
-                            ) : (
-                              <>
-                                <button className="d-link" onClick={() => setChatEdit({ id: m.id, text: m.message })}>تعديل</button>{' · '}
-                                <button className="d-link" onClick={() => { if (confirm('حذف هذه الرسالة؟')) chatCall('DELETE', { id: m.id }); }}>حذف</button>
-                              </>
-                            )}
-                          </td>
+                          <td>{m.last_login ? fmtDateTime(m.last_login) : '—'}</td>
+                          <td><button className="d-link" onClick={async () => { if (!confirm('حذف العضو «' + m.username + '»؟')) return; const r = await fetch('/api/admin/members', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id }) }); if (r.ok) { loadMembers(); loadLogs(); } else alert('تعذّر الحذف'); }}>حذف</button></td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                  {chatRows.length === 0 && <p className="d-empty pad">لا توجد رسائل حالياً (تُحذف تلقائياً بعد 15 ساعة).</p>}
+                  {members.length === 0 && <p className="d-empty pad">لا يوجد أعضاء مسجّلون بعد.</p>}
                 </div>
               </section>
-              <p className="d-note">كل تعديل أو حذف يُسجَّل في «سجل النشاط» باسم الإداري.</p>
+              <p className="d-note">الصلاحيات: «عضو» (يتفاعل في المعرض وتظهر رسائله مباشرة) و«إداري» (حسابات الإداريين في تبويب الإداريون).</p>
             </>
           )}
 
@@ -717,6 +782,7 @@ export default function AdminDashboard() {
                 <h2>إضافة إداري جديد</h2>
                 <form onSubmit={handleAddAdmin} className="d-form">
                   <label>اسم المستخدم<input value={adminForm.username} onChange={(e) => setAdminForm((f) => ({ ...f, username: e.target.value }))} autoComplete="off" /></label>
+                  <label>البريد الإلكتروني (اختياري — للدخول به من المعرض)<input type="email" dir="ltr" value={adminForm.email} onChange={(e) => setAdminForm((f) => ({ ...f, email: e.target.value }))} autoComplete="off" /></label>
                   <label>كلمة المرور<input type="password" placeholder="٦ أحرف على الأقل" value={adminForm.password} onChange={(e) => setAdminForm((f) => ({ ...f, password: e.target.value }))} autoComplete="new-password" /></label>
                   <button className="d-btn gold" type="submit"><Icon name="plus" size={16} /> إضافة</button>
                 </form>

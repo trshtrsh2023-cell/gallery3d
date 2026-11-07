@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 
@@ -8,6 +8,8 @@ export default function AdminLogin() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [needSetup, setNeedSetup] = useState(false);
+  useEffect(() => { fetch('/api/admin/setup', { cache: 'no-store' }).then((r) => r.json()).then((d) => setNeedSetup(!!d.needed)).catch(() => {}); }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -77,7 +79,7 @@ export default function AdminLogin() {
         </button>
 
         <a href="/" style={styles.back}>↩ العودة للمعرض</a>
-        <a href="/admin/setup" style={{ ...styles.back, marginTop: '6px' }}>مشكلة في الدخول؟ إعداد / تشخيص الحساب</a>
+        {needSetup && <a href="/admin/setup" style={{ ...styles.back, marginTop: '6px' }}>لا يوجد حساب إداري بعد — إعداد الحساب الأول</a>}
       </form>
     </div>
   );

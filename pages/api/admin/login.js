@@ -2,10 +2,12 @@ import bcrypt from 'bcryptjs';
 import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
 import { signAdminToken, setAdminCookie } from '../../../lib/auth';
 import { logAdmin } from '../../../lib/adminLog';
+import { limited } from '../../../lib/rateLimit';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  if (limited(req, 'adminlogin', 8, 10 * 60 * 1000)) return res.status(429).json({ error: 'محاولات كثيرة، حاول بعد عدة دقائق' });
   try {
     const { username, password } = req.body || {};
     if (!username || !password) {

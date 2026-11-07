@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import Head from 'next/head';
-import { createObjectMesh, normalizeObjects, buildDefaultObjects, objectBox } from '../lib/galleryObjects';
+import EntryAuth from '../components/EntryAuth';
+import { FONTS_CSS_HREF, createObjectMesh, normalizeObjects, normalizeLighting, buildDefaultObjects, objectBox } from '../lib/galleryObjects';
 import { DEFAULT_FRAMES, FRAME_STYLE, ROOM_WALLS, normalizeFrames, normalizeWalls, assignPhotosToFrames, prepareDisplayTexture, fitImage, makeEmptyFrameTexture } from '../lib/galleryLayout';
 
 const PRESENCE_HEARTBEAT_MS = 20000;
@@ -46,12 +47,52 @@ export default function Home() {
   const [chatSending, setChatSending] = useState(false);
   const [chatUnread, setChatUnread] = useState(0);
   const chatLastIdRef = useRef(0);
+  const [chatPending, setChatPending] = useState([]); // رسائل الزائر بانتظار الموافقة (محلياً)
   const chatOpenRef = useRef(false);
   const chatListRef = useRef(null);
   const [chatIsAdmin, setChatIsAdmin] = useState(false);
+  const [member, setMember] = useState(null); // { username, name, role } عند تسجيل دخول عضو/إداري
+  const memberRef = useRef(null);
+  memberRef.current = member;
   const presenceTimerRef = useRef(null);
   const sessionTimerRef = useRef(null);
   const sessionIdRef = useRef(null);
+
+  // ===== حماية المحتوى (ردع): منع النسخ والحفظ السريع، وقفل النطاق، ومنع الطباعة =====
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    // قفل النطاق: إذا نُسخ الموقع على نطاق آخر لا يعمل (اضبط NEXT_PUBLIC_ALLOWED_HOSTS مثل: mysite.com,www.mysite.com)
+    const allowed = (process.env.NEXT_PUBLIC_ALLOWED_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+    const host = window.location.hostname.toLowerCase();
+    if (allowed.length && !allowed.some((h) => host === h || host.endsWith('.' + h)) && host !== 'localhost' && host !== '127.0.0.1' && !host.endsWith('.vercel.app')) {
+      document.body.innerHTML = '';
+      return undefined;
+    }
+    const isField = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    const onCtx = (e) => { if (!isField(e.target)) e.preventDefault(); };
+    const onDrag = (e) => e.preventDefault();
+    const onSel = (e) => { if (!isField(e.target)) e.preventDefault(); };
+    const onCopy = (e) => { if (!isField(e.target)) e.preventDefault(); };
+    const onKey = (e) => {
+      if (isField(e.target)) return;
+      const k = (e.key || '').toLowerCase();
+      const mod = e.ctrlKey || e.metaKey;
+      if (e.key === 'F12' || (mod && e.shiftKey && ['i', 'j', 'c', 'k'].includes(k)) || (mod && ['s', 'u', 'p'].includes(k))) { e.preventDefault(); e.stopPropagation(); }
+    };
+    document.addEventListener('contextmenu', onCtx);
+    document.addEventListener('dragstart', onDrag);
+    document.addEventListener('selectstart', onSel);
+    document.addEventListener('copy', onCopy);
+    document.addEventListener('keydown', onKey, true);
+    try { console.log('%cمحتوى هذا المعرض محمي بحقوق النشر © جمعية الثقافة والفنون بالطائف', 'color:#c9a35b;font-size:14px'); } catch (e) {}
+    return () => {
+      document.removeEventListener('contextmenu', onCtx);
+      document.removeEventListener('dragstart', onDrag);
+      document.removeEventListener('selectstart', onSel);
+      document.removeEventListener('copy', onCopy);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, []);
 
   useEffect(() => {
     fetch('/api/photos')
@@ -88,7 +129,8 @@ export default function Home() {
         setLayout({
           frames: frames.length ? frames : DEFAULT_FRAMES,
           walls: walls && walls.length ? walls : null,
-          objects: normalizeObjects(d && d.objects)
+          objects: normalizeObjects(d && d.objects),
+          lighting: normalizeLighting(d && d.lighting)
         });
       })
       .catch(() => setLayout({ frames: DEFAULT_FRAMES, walls: null }));
@@ -109,7 +151,13 @@ export default function Home() {
     if (typeof window === 'undefined') return;
     setIsMobile(('ontouchstart' in window) || navigator.maxTouchPoints > 0);
     const saved = readSession();
-    if (saved) { setVisitorName(saved.name); setEntering(true); setAutoSession(saved); }
+    // عضو مسجّل (كوكي) => دخول تلقائي كعضو؛ وإلا جلسة الزائر المحفوظة (٣ ساعات)
+    setEntering(true);
+    fetch('/api/auth/me', { cache: 'no-store' }).then((r) => r.json()).then((d) => {
+      if (d && d.user) { setMember(d.user); setVisitorName(d.user.username); setAutoSession({ name: d.user.username, member: true }); }
+      else if (saved) { setVisitorName(saved.name); setAutoSession(saved); }
+      else setEntering(false);
+    }).catch(() => { if (saved) { setVisitorName(saved.name); setAutoSession(saved); } else setEntering(false); });
     try {
       let sid = sessionStorage.getItem('gallery_session_id');
       if (!sid) {
@@ -220,16 +268,20 @@ export default function Home() {
       renderer.outputColorSpace = window.THREE.SRGBColorSpace;
       host.appendChild(renderer.domElement);
 
-      scene.add(new window.THREE.AmbientLight(0xfff5ea, 0.55));
-      scene.add(new window.THREE.HemisphereLight(0xfff1de, 0x3a2a1c, 0.28));
-      const sun = new window.THREE.DirectionalLight(0xfff0dd, 0.22);
+      const LT = layoutData.lighting || { ambient: 1, lamps: 1, led: 1 };
+      scene.add(new window.THREE.AmbientLight(0xfff5ea, 0.55 * LT.ambient));
+      scene.add(new window.THREE.HemisphereLight(0xfff1de, 0x3a2a1c, 0.28 * LT.ambient));
+      const sun = new window.THREE.DirectionalLight(0xfff0dd, 0.22 * LT.ambient);
       sun.position.set(4, 9, 6);
       scene.add(sun);
 
-      const woodTex = createWoodTexture();
-      woodTex.wrapS = woodTex.wrapT = window.THREE.RepeatWrapping;
-      woodTex.repeat.set(8, 8);
-      const floorMat = new window.THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.3, metalness: 0.1 });
+      // أرضية خرسانية من الصورة المرفقة (تكرار مرآتي لإخفاء حدود التبليط)
+      const floorTex = new window.THREE.TextureLoader().load('/textures/floor.jpg');
+      floorTex.wrapS = floorTex.wrapT = window.THREE.MirroredRepeatWrapping;
+      floorTex.repeat.set(50 / 8, 50 / 3.4);
+      floorTex.anisotropy = 8;
+      floorTex.encoding = window.THREE.sRGBEncoding;
+      const floorMat = new window.THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.62, metalness: 0.08 });
       const floor = new window.THREE.Mesh(new window.THREE.PlaneGeometry(50, 50), floorMat);
       floor.rotation.x = -Math.PI / 2;
       scene.add(floor);
@@ -305,7 +357,7 @@ export default function Home() {
         scene.add(ceil);
 
         // إضاءات سقف قليلة موزعة بالتساوي (شبكة منتظمة على كامل مساحة المعرض)
-        const lampMat = new THREE_.MeshBasicMaterial({ color: 0xfff0cf });
+        const lampMat = new THREE_.MeshBasicMaterial({ color: new THREE_.Color(0xfff0cf).multiplyScalar(0.25 + 0.75 * Math.min(1, LT.lamps)) });
         const ringMat = new THREE_.MeshStandardMaterial({ color: 0x2a2724, roughness: 0.6 });
         const lampGeo = new THREE_.CylinderGeometry(0.28, 0.28, 0.03, 24);
         const ringGeo = new THREE_.CylinderGeometry(0.38, 0.38, 0.05, 24);
@@ -324,7 +376,7 @@ export default function Home() {
             const lamp = new THREE_.Mesh(lampGeo, lampMat);
             lamp.position.set(lx, ceilY - 0.045, lz);
             scene.add(lamp);
-            const pl = new THREE_.PointLight(0xfff0d8, 0.34, Math.max(14, Math.max(areaW / nx, areaD / nz) * 1.6), 1.3);
+            const pl = new THREE_.PointLight(0xfff0d8, 0.34 * LT.lamps, Math.max(14, Math.max(areaW / nx, areaD / nz) * 1.6), 1.3);
             pl.position.set(lx, ceilY - 0.6, lz);
             scene.add(pl);
           }
@@ -361,7 +413,7 @@ export default function Home() {
         cx.fillStyle = gr; cx.fillRect(0, 0, 128, 128);
       }
       const ledTex = new window.THREE.CanvasTexture(ledCanvas);
-      const ledMat = new window.THREE.MeshBasicMaterial({ map: ledTex, transparent: true, blending: window.THREE.AdditiveBlending, depthWrite: false, opacity: 0.5 });
+      const ledMat = new window.THREE.MeshBasicMaterial({ map: ledTex, transparent: true, blending: window.THREE.AdditiveBlending, depthWrite: false, opacity: Math.min(1, 0.5 * LT.led) });
 
       frames.forEach((fr) => {
         const ph = byFrame.get(fr.n) || null;
@@ -770,18 +822,18 @@ export default function Home() {
     async function poll() {
       if (stop || document.hidden) return;
       try {
-        const r = await fetch('/api/chat?after=' + chatLastIdRef.current, { cache: 'no-store' });
+        const r = await fetch('/api/chat', { cache: 'no-store' });
         const d = await r.json();
         const list = (d && d.messages) || [];
-        if (list.length && !stop) {
-          chatLastIdRef.current = list[list.length - 1].id;
-          setChatMsgs((prev) => {
-            const seen = new Set(prev.map((m) => m.id));
-            const add = list.filter((m) => !seen.has(m.id));
-            return add.length ? [...prev, ...add].slice(-200) : prev;
-          });
-          if (!chatOpenRef.current) setChatUnread((u) => u + list.length);
+        if (stop) return;
+        const lastId = list.length ? list[list.length - 1].id : 0;
+        if (lastId > chatLastIdRef.current && chatLastIdRef.current !== 0 && !chatOpenRef.current) {
+          setChatUnread((u) => u + list.filter((m) => m.id > chatLastIdRef.current).length);
         }
+        chatLastIdRef.current = Math.max(chatLastIdRef.current, lastId);
+        setChatMsgs(list);
+        // أي رسالة معلّقة أصبحت معتمدة تُزال من قائمة «بانتظار الموافقة»
+        setChatPending((p) => p.filter((x) => !list.some((m) => m.id === x.id)));
       } catch (e) {}
     }
     poll();
@@ -800,15 +852,19 @@ export default function Home() {
     setChatSending(true); setChatErr('');
     try {
       const sess = readSession();
-      const name = (sess && sess.name) || visitorName.trim() || 'زائر';
+      const name = (memberRef.current && memberRef.current.username) || (sess && sess.name) || visitorName.trim() || 'زائر';
       const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, message: text }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok || !d.ok) { setChatErr(d.error || 'تعذّر الإرسال'); }
       else {
         setChatText('');
         if (d.message) {
-          chatLastIdRef.current = Math.max(chatLastIdRef.current, d.message.id);
-          setChatMsgs((prev) => (prev.some((m) => m.id === d.message.id) ? prev : [...prev, d.message]));
+          if (d.message.status === 'approved') {
+            chatLastIdRef.current = Math.max(chatLastIdRef.current, d.message.id);
+            setChatMsgs((prev) => (prev.some((m) => m.id === d.message.id) ? prev : [...prev, d.message]));
+          } else {
+            setChatPending((p) => [...p, d.message]);
+          }
         }
       }
     } catch (e) { setChatErr('تعذّر الإرسال'); }
@@ -843,7 +899,7 @@ export default function Home() {
   }
 
   // auto = دخول تلقائي بجلسة محفوظة (لا يُسجَّل كزيارة جديدة)
-  async function doEnter(name, auto) {
+  async function doEnter(name, auto, isMember) {
     setEntering(true);
     setSessionNotice('');
     const prev = readSession();
@@ -873,7 +929,8 @@ export default function Home() {
     }
     const sess = writeSession(name, sameSession);
     if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current);
-    sessionTimerRef.current = setTimeout(expireSession, Math.max(1000, sess.expires - Date.now()));
+    // الزائر: جلسة ٣ ساعات. العضو: يبقى مسجّلاً (كوكي) بلا انتهاء ٣ ساعات
+    if (!isMember) sessionTimerRef.current = setTimeout(expireSession, Math.max(1000, sess.expires - Date.now()));
 
     showEntry(false);
     window.dispatchEvent(new Event('gallery:resume'));
@@ -892,14 +949,22 @@ export default function Home() {
 
   // الدخول التلقائي عند وجود جلسة محفوظة صالحة
   useEffect(() => {
-    if (autoSession) doEnter(autoSession.name, true);
+    if (autoSession) doEnter(autoSession.name, true, !!autoSession.member);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSession]);
+
+  function handleMemberAuthed(user) {
+    setMember(user);
+    setVisitorName(user.username);
+    doEnter(user.username, false, true);
+  }
 
   // تسجيل خروج الزائر: يمسح الجلسة المحفوظة ويعيده لصفحة إدخال الاسم
   function handleVisitorLogout() {
     setMenuOpen(false);
     clearSession();
+    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    setMember(null); setChatMsgs([]); setChatPending([]); chatLastIdRef.current = 0;
     if (sessionTimerRef.current) { clearTimeout(sessionTimerRef.current); sessionTimerRef.current = null; }
     showEntry(true);
     window.dispatchEvent(new Event('gallery:pause'));
@@ -942,6 +1007,7 @@ export default function Home() {
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
+        <link rel="stylesheet" href={FONTS_CSS_HREF} />
       </Head>
 
       <style>{`
@@ -976,7 +1042,13 @@ export default function Home() {
         }
         #tooFarToast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 
+        body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+        input, textarea { -webkit-user-select: text; user-select: text; }
+        img { -webkit-user-drag: none; }
+        @media print { html, body { display: none !important; } }
         #entryNameInput { width: 100%; box-sizing: border-box; padding: 14px; margin-bottom: 14px; border-radius: 9px; border: 1px solid rgba(201,163,91,.22); background: rgba(0,0,0,.32); color: #f3efe8; font-size: 15.5px; outline: none; text-align: center; font-family: inherit; transition: border-color .2s ease; }
+        .ea-input { width: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 9px; border: 1px solid rgba(201,163,91,.22); background: rgba(0,0,0,.32); color: #f3efe8; font-size: 15px; outline: none; font-family: inherit; transition: border-color .2s ease; }
+        .ea-input:focus { border-color: rgba(201,163,91,.65); }
         #entryNameInput:focus { border-color: rgba(201,163,91,.65); }
         #entryNameInput::placeholder { color: #776f62; }
 
@@ -1073,14 +1145,14 @@ export default function Home() {
 
       <div id="canvasHost" style={{ position: 'fixed', inset: 0, touchAction: 'none' }}></div>
 
-      <div id="entryOverlay" style={{ position: 'fixed', inset: 0, zIndex: 1000, overflow: 'hidden', background: 'radial-gradient(circle at 50% 28%, #211c17 0%, #0a0806 72%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#eee' }}>
+      <div id="entryOverlay" style={{ position: 'fixed', inset: 0, zIndex: 1000, overflowY: 'auto', overflowX: 'hidden', background: 'radial-gradient(circle at 50% 28%, #211c17 0%, #0a0806 72%)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', color: '#eee' }}>
 
         <svg viewBox="0 0 1200 220" preserveAspectRatio="none" style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '22vh', opacity: 0.4, pointerEvents: 'none' }}>
           <path d="M0,220 L0,150 L110,95 L200,140 L320,55 L430,125 L560,30 L680,115 L790,65 L900,135 L1030,60 L1140,120 L1200,80 L1200,220 Z" fill="none" stroke="#c9a35b" strokeWidth="1.1" />
           <path d="M0,220 L0,180 L150,140 L280,175 L420,120 L570,170 L720,110 L860,165 L1000,115 L1200,160 L1200,220 Z" fill="none" stroke="#8a6e3f" strokeWidth="0.8" opacity="0.6" />
         </svg>
 
-        <div style={{ position: 'relative', textAlign: 'center', padding: '40px 36px', width: 'min(90vw, 440px)' }}>
+        <div style={{ position: 'relative', textAlign: 'center', padding: '40px 36px', width: 'min(90vw, 440px)', margin: 'auto' }}>
           <svg className="entry-aperture" width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="#c9a35b" strokeWidth="1.2" style={{ margin: '0 auto 14px' }}>
             <circle cx="12" cy="12" r="10" />
             <line x1="14.31" y1="8" x2="20.05" y2="17.94" />
@@ -1102,20 +1174,7 @@ export default function Home() {
           </div>
 
           {sessionNotice && <div style={{ color: '#c9a35b', fontSize: '13px', marginBottom: '12px' }}>{sessionNotice}</div>}
-          <input
-            id="entryNameInput"
-            placeholder="اكتب اسمك هنا..."
-            value={visitorName}
-            onChange={(e) => setVisitorName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleEnter()}
-          />
-          <button onClick={handleEnter} disabled={entering} style={{ width: '100%', padding: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, #c9a35b, #9c7a3c)', color: '#1a1408', border: 'none', borderRadius: '9px', fontSize: '15.5px', fontWeight: 600, cursor: 'pointer' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a1408" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-              <circle cx="12" cy="13" r="4" />
-            </svg>
-            {entering ? '...جاري الدخول' : 'دخول المعرض'}
-          </button>
+          <EntryAuth visitorName={visitorName} setVisitorName={setVisitorName} onGuestEnter={handleEnter} entering={entering} onAuthed={handleMemberAuthed} />
         </div>
       </div>
 
@@ -1164,20 +1223,27 @@ export default function Home() {
             <div id="chatPanel" dir="rtl" style={{ position: 'fixed', top: '70px', left: '16px', zIndex: 320, width: 'min(340px, calc(100vw - 32px))', height: 'min(56vh, 460px)', display: 'flex', flexDirection: 'column', background: 'rgba(15,23,42,.88)', border: '1px solid rgba(255,255,255,.2)', borderRadius: '14px', backdropFilter: 'blur(10px)', color: '#f3efe8', overflow: 'hidden', fontFamily: 'inherit' }}>
               <div style={{ padding: '10px 14px', fontSize: '13px', borderBottom: '1px solid rgba(255,255,255,.12)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <b>دردشة الزوار</b>
-                <span style={{ fontSize: '11px', opacity: 0.65 }}>تختفي الرسائل بعد 15 ساعة</span>
+                <span style={{ fontSize: '11px', opacity: 0.65 }}>{member ? (member.role === 'admin' ? 'إداري' : 'عضو') + ': ' + member.username : 'زائر'}</span>
               </div>
               <div ref={chatListRef} style={{ flex: 1, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '8px', WebkitOverflowScrolling: 'touch' }}>
                 {chatMsgs.length === 0 && <div style={{ opacity: 0.55, fontSize: '13px', textAlign: 'center', marginTop: '20px' }}>لا توجد رسائل بعد — كن أول من يكتب 👋</div>}
                 {chatMsgs.map((m) => {
-                  const mine = (readSession() || {}).name === m.name;
+                  const mine = ((memberRef.current && memberRef.current.username) || (readSession() || {}).name) === m.name;
                   return (
                     <div key={m.id} style={{ alignSelf: mine ? 'flex-start' : 'flex-end', maxWidth: '88%', background: mine ? 'rgba(56,189,248,.22)' : 'rgba(255,255,255,.1)', borderRadius: '10px', padding: '6px 10px' }}>
-                      <div style={{ fontSize: '11px', opacity: 0.7, marginBottom: '2px' }}>{m.name} · {new Date(m.created_at).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}{chatIsAdmin && <button onClick={() => deleteChatMsg(m.id)} style={{ marginInlineStart: '8px', background: 'none', border: 'none', color: '#ff8a8a', cursor: 'pointer', fontSize: '11px', padding: 0 }}>حذف</button>}</div>
+                      <div style={{ fontSize: '11px', opacity: 0.7, marginBottom: '2px' }}>{m.name}{m.role === 'admin' ? ' 🛡️ إداري' : m.role === 'member' ? ' ✓ عضو' : ''} · {new Date(m.created_at).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}{chatIsAdmin && <button onClick={() => deleteChatMsg(m.id)} style={{ marginInlineStart: '8px', background: 'none', border: 'none', color: '#ff8a8a', cursor: 'pointer', fontSize: '11px', padding: 0 }}>حذف</button>}</div>
                       <div style={{ fontSize: '14px', lineHeight: 1.5, wordBreak: 'break-word' }}>{m.message}</div>
                     </div>
                   );
                 })}
+                {chatPending.map((m) => (
+                  <div key={'p' + m.id} style={{ alignSelf: 'flex-start', maxWidth: '88%', background: 'rgba(240,177,60,.14)', border: '1px dashed rgba(240,177,60,.5)', borderRadius: '10px', padding: '6px 10px' }}>
+                    <div style={{ fontSize: '11px', color: '#f0b13c', marginBottom: '2px' }}>بانتظار موافقة الإدارة — لا يراها غيرك حالياً</div>
+                    <div style={{ fontSize: '14px', lineHeight: 1.5, wordBreak: 'break-word' }}>{m.message}</div>
+                  </div>
+                ))}
               </div>
+              {!member && <div style={{ fontSize: '11px', opacity: 0.7, padding: '0 12px 6px', textAlign: 'center' }}>رسائل الزوار تُراجَع من الإدارة قبل ظهورها. سجّل كعضو لتظهر رسائلك فوراً.</div>}
               {chatErr && <div style={{ color: '#ff8a8a', fontSize: '12px', padding: '0 12px 6px' }}>{chatErr}</div>}
               <div style={{ display: 'flex', gap: '8px', padding: '10px', borderTop: '1px solid rgba(255,255,255,.12)' }}>
                 <input value={chatText} maxLength={280} placeholder="اكتب رسالتك..." onChange={(e) => setChatText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') sendChat(); }} style={{ flex: 1, minWidth: 0, padding: '10px 12px', borderRadius: '9px', border: '1px solid rgba(255,255,255,.2)', background: 'rgba(0,0,0,.35)', color: '#f3efe8', fontSize: '16px', outline: 'none', fontFamily: 'inherit' }} />

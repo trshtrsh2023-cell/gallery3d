@@ -20,15 +20,20 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     try {
       const { username, password } = req.body || {};
+      const email = String((req.body && req.body.email) || '').trim().toLowerCase().slice(0, 120);
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return res.status(400).json({ error: 'البريد الإلكتروني غير صالح' });
       if (!username || !password || password.length < 6) {
         return res.status(400).json({ error: 'اسم المستخدم مطلوب وكلمة المرور ٦ أحرف على الأقل' });
       }
       const password_hash = await bcrypt.hash(password, 10);
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('admins')
-        .insert([{ username: username.trim(), password_hash }])
+        .insert([{ username: username.trim(), password_hash, ...(email ? { email } : {}) }])
         .select('id, username, created_at')
         .single();
+      if (error && email && /email/.test(error.message)) {
+        ({ data, error } = await supabase.from('admins').insert([{ username: username.trim(), password_hash }]).select('id, username, created_at').single());
+      }
       if (error) {
         if (error.code === '23505') return res.status(409).json({ error: 'اسم المستخدم موجود مسبقاً' });
         return res.status(500).json({ error: error.message });

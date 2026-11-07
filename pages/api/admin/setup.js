@@ -7,6 +7,16 @@ import { logAdmin } from '../../../lib/adminLog';
 // بعد وجود حساب أدمن واحد على الأقل، تبقى هذه النقطة تعمل فقط لمن يملك
 // السر، حتى تتمكن من إضافة حساب احتياطي إن فقدت كلمة المرور.
 export default async function handler(req, res) {
+  // GET: هل يلزم الإعداد الأول؟ (لا يوجد أي حساب أدمن بعد) — يُستخدم لإظهار رابط الإعداد فقط عند الحاجة
+  if (req.method === 'GET') {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const sb = getSupabaseAdmin();
+      if (!sb) return res.status(200).json({ needed: false });
+      const { count, error } = await sb.from('admins').select('id', { count: 'exact', head: true });
+      return res.status(200).json({ needed: !error && count === 0 });
+    } catch (e) { return res.status(200).json({ needed: false }); }
+  }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {

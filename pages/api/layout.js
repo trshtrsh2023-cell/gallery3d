@@ -1,7 +1,7 @@
 import { getSupabaseAdmin } from '../../lib/supabaseAdmin';
 import { getAdminFromReq } from '../../lib/auth';
 import { DEFAULT_FRAMES, ROOM_WALLS, normalizeFrames } from '../../lib/galleryLayout';
-import { normalizeObjects } from '../../lib/galleryObjects';
+import { normalizeObjects, normalizeLighting } from '../../lib/galleryObjects';
 import { logAdmin } from '../../lib/adminLog';
 import { diffLayout } from '../../lib/layoutDiff';
 
@@ -45,7 +45,8 @@ export default async function handler(req, res) {
     const fallback = { frames: DEFAULT_FRAMES, walls: defaultWalls, isDefault: true, updated_at: null };
     if (!supabase) return res.status(200).json(fallback);
     try {
-      let { data, error } = await supabase.from('gallery_layout').select('frames, walls, objects, updated_at').eq('id', 1).maybeSingle();
+      let { data, error } = await supabase.from('gallery_layout').select('frames, walls, objects, lighting, updated_at').eq('id', 1).maybeSingle();
+      if (error) ({ data, error } = await supabase.from('gallery_layout').select('frames, walls, objects, updated_at').eq('id', 1).maybeSingle());
       if (error) {
         // عمود objects غير موجود بعد (لم يُنفَّذ ملف الـ SQL المحدّث) — نقرأ بدونه
         ({ data, error } = await supabase.from('gallery_layout').select('frames, walls, updated_at').eq('id', 1).maybeSingle());
@@ -56,7 +57,7 @@ export default async function handler(req, res) {
       const walls = Array.isArray(data.walls) && data.walls.length > 0 ? data.walls : defaultWalls;
       
       if (!frames.length) return res.status(200).json(fallback);
-      return res.status(200).json({ frames, walls, objects: normalizeObjects(data.objects), isDefault: false, updated_at: data.updated_at });
+      return res.status(200).json({ frames, walls, objects: normalizeObjects(data.objects), lighting: normalizeLighting(data.lighting), isDefault: false, updated_at: data.updated_at });
     } catch (e) {
       console.error('layout GET crashed:', e);
       return res.status(200).json(fallback);
@@ -69,7 +70,8 @@ export default async function handler(req, res) {
     if (!supabase) return res.status(500).json({ error: 'الخادم غير مهيأ — تحقق من متغيرات بيئة Supabase' });
 
     try {
-      const { frames: rawFrames, walls: rawWalls, photoSlots, objects: rawObjects } = req.body || {};
+      const { frames: rawFrames, walls: rawWalls, photoSlots, objects: rawObjects, lighting: rawLighting } = req.body || {};
+      const lighting = normalizeLighting(rawLighting);
       const objects = Array.isArray(rawObjects) ? normalizeObjects(rawObjects) : null;
       if (!Array.isArray(rawFrames) || rawFrames.length === 0) {
         return res.status(400).json({ error: 'لا يمكن حفظ تخطيط بلا إطارات' });
@@ -100,9 +102,14 @@ export default async function handler(req, res) {
       const prevSlots = new Map((prevPhotos || []).map((p) => [String(p.id), p.slot_index ?? null]));
       const photoTitles = new Map((prevPhotos || []).map((p) => [String(p.id), p.title || 'بدون عنوان']));
 
+      let prevObjsBefore = [];
+      try { const { data: po0 } = await supabase.from('gallery_layout').select('objects').eq('id', 1).maybeSingle(); prevObjsBefore = normalizeObjects(po0 && po0.objects) || []; } catch (e) {}
  const baseRow = { id: 1, frames, walls, updated_at: new Date().toISOString(), updated_by: admin.username || null };
       let objectsSaved = true;
-      let { error } = await supabase.from('gallery_layout').upsert([objects ? { ...baseRow, objects } : baseRow], { onConflict: 'id' });
+      let { error } = await supabase.from('gallery_layout').upsert([{ ...baseRow, ...(objects ? { objects } : {}), ...(lighting ? { lighting } : {}) }], { onConflict: 'id' });
+      if (error && lighting && /lighting/.test(error.message)) {
+        ({ error } = await supabase.from('gallery_layout').upsert([{ ...baseRow, ...(objects ? { objects } : {}) }], { onConflict: 'id' }));
+      }
       if (error && objects && /objects/.test(error.message)) {
         // عمود objects غير موجود — نحفظ الباقي ونُنبّه
         objectsSaved = false;
@@ -133,9 +140,7 @@ export default async function handler(req, res) {
 
       let objLines = [];
       if (objects) {
-        let prevObjs = [];
-        try { const { data: po } = await supabase.from('gallery_layout').select('objects').eq('id', 1).maybeSingle(); prevObjs = normalizeObjects(po && po.objects) || []; } catch (e) {}
-        objLines = diffObjects(prevObjs, objects);
+        objLines = diffObjects(prevObjsBefore, objects);
       }
       const d = diffLayout({ prevFrames, newFrames: framesForDiff, prevWalls, newWalls: walls, prevSlots, newSlots: photoSlots, photoTitles });
       const summary = objLines.length ? (d.lines.length ? d.summary + '، ' : 'حفظ المعرض: ') + objLines.length + ' تغيير في المجسمات' : d.summary;

@@ -5,7 +5,7 @@ import {
   DEFAULT_FRAMES, FRAME_STYLE, FRAME_LIMITS, ROOM_WALLS,
   normalizeFrames, assignPhotosToFrames, prepareDisplayTexture, fitImage, makeEmptyFrameTexture
 } from '../../lib/galleryLayout';
-import { OBJECT_KINDS, MAX_OBJECTS, normalizeObjects, buildDefaultObjects, createObjectMesh, applyObjectTransform, objectBox } from '../../lib/galleryObjects';
+import { OBJECT_KINDS, MAX_OBJECTS, TEXT_FONTS, FONTS_CSS_HREF, DEFAULT_LIGHTING, normalizeLighting, normalizeObjects, buildDefaultObjects, createObjectMesh, applyObjectTransform, objectBox } from '../../lib/galleryObjects';
 
 let uidCounter = 1;
 const newUid = (prefix = 'f') => prefix + (uidCounter++);
@@ -32,9 +32,10 @@ function createEngine(THREE, host, cb) {
   dom.tabIndex = 0;
   dom.style.outline = 'none';
 
-  scene.add(new THREE.AmbientLight(0xfff5ea, 0.6));
-  scene.add(new THREE.HemisphereLight(0xfff1de, 0x3a2a1c, 0.3));
+  const ambL = new THREE.AmbientLight(0xfff5ea, 0.6);
+  const hemL = new THREE.HemisphereLight(0xfff1de, 0x3a2a1c, 0.3);
   const sun = new THREE.DirectionalLight(0xfff0dd, 0.25);
+  scene.add(ambL, hemL);
   sun.position.set(6, 12, 8);
   scene.add(sun);
 
@@ -235,7 +236,7 @@ function createEngine(THREE, host, cb) {
     const alive = new Set();
     list.forEach((o) => {
       alive.add(o.uid);
-      const sig = o.kind + '|' + (o.kind === 'text' ? o.text + '|' + o.color : '');
+      const sig = o.kind + '|' + (o.kind === 'text' ? [o.text, o.color, o.font, o.stroke, o.strokeColor, o.shadow].join('|') : '');
       let nd = objNodes.get(o.uid);
       if (nd && nd.sig !== sig) { scene.remove(nd.group); scene.remove(nd.outline); objNodes.delete(o.uid); nd = null; }
       if (!nd) {
@@ -555,6 +556,7 @@ function createEngine(THREE, host, cb) {
     sync,
     syncWalls,
     syncObjects,
+    setAmbient(k) { ambL.intensity = 0.6 * k; hemL.intensity = 0.3 * k; sun.intensity = 0.25 * k; },
     focusObject(o) {
       camera.position.set(o.x + Math.sin(o.r || 0) * 4, Math.max(1.2, o.y + 0.5), o.z + Math.cos(o.r || 0) * 4);
       yaw = o.r || 0;
@@ -718,6 +720,7 @@ export default function GalleryEditor() {
   const [objects, setObjects] = useState([]);
   const [selObj, setSelObj] = useState(null);
   const [extra, setExtra] = useState([]);          // عناصر إضافية محددة (تحديد متعدد) بصيغة 'f:uid' / 'w:uid' / 'o:uid'
+  const [lighting, setLighting] = useState(DEFAULT_LIGHTING);
   const [carry, setCarry] = useState(true);        // تحريك الجدار مع لوحاته ومجسماته
   const [multiMode, setMultiMode] = useState(false);
 
@@ -776,6 +779,7 @@ export default function GalleryEditor() {
       setFrames(listFrames);
       setWalls(listWalls);
       setObjects(normalizeObjects(lay && lay.objects) || buildDefaultObjects(listWalls));
+      setLighting(normalizeLighting(lay && lay.lighting) || DEFAULT_LIGHTING);
       setPhotos(phArr);
       setPhotoOf(po);
       setIsDefault(!!(lay && lay.isDefault));
@@ -822,7 +826,8 @@ export default function GalleryEditor() {
     );
     engineRef.current.syncWalls(walls, live.current.selKeys);
     engineRef.current.syncObjects(objects, live.current.selKeys);
-  }, [engineReady, frames, walls, objects, photoOf, photos, selKeysStr]);
+    if (engineRef.current.setAmbient) engineRef.current.setAmbient(lighting.ambient);
+  }, [engineReady, lighting, frames, walls, objects, photoOf, photos, selKeysStr]);
 
   useEffect(() => { setNDraft(selFrame ? String(selFrame.n) : ''); }, [sel, selFrame]);
 
@@ -958,7 +963,7 @@ export default function GalleryEditor() {
     let o;
     if (kind === 'text') {
       const p = engineRef.current.frontPlacement();
-      o = { uid: newObjUid(), kind, x: r3(p.x + Math.sin(p.r) * 0.18), y: r3(Math.max(1.4, p.y + 0.9)), z: r3(p.z + Math.cos(p.r) * 0.18), r: p.r, s: 1, text: 'مرحباً بكم في المعرض', color: '#c9a35b' };
+      o = { uid: newObjUid(), kind, x: r3(p.x + Math.sin(p.r) * 0.18), y: r3(Math.max(1.4, p.y + 0.9)), z: r3(p.z + Math.cos(p.r) * 0.18), r: p.r, s: 1, text: 'مرحباً بكم في المعرض', color: '#c9a35b', font: 'cairo', stroke: 0, strokeColor: '#1d1a14', shadow: false };
     } else {
       const g = engineRef.current.frontGround();
       o = { uid: newObjUid(), kind, x: g.x, y: 0, z: g.z, r: g.r, s: 1 };
@@ -1112,7 +1117,7 @@ export default function GalleryEditor() {
     setSaving(true);
     try {
       const payloadFrames = frames.map((f) => ({ o: f.origN ?? null, n: f.n, x: r3(f.x), y: r3(f.y), z: r3(f.z), r: r3(f.r), s: r3(f.s) }));
-      const payloadObjects = objects.map((o) => ({ uid: o.uid, kind: o.kind, x: r3(o.x), y: r3(o.y), z: r3(o.z), r: r3(o.r || 0), s: r3(o.s || 1), ...(o.kind === 'text' ? { text: o.text, color: o.color } : {}) }));
+      const payloadObjects = objects.map((o) => ({ uid: o.uid, kind: o.kind, x: r3(o.x), y: r3(o.y), z: r3(o.z), r: r3(o.r || 0), s: r3(o.s || 1), ...(o.kind === 'text' ? { text: o.text, color: o.color, font: o.font, stroke: o.stroke, strokeColor: o.strokeColor, shadow: !!o.shadow } : {}) }));
       const payloadWalls = walls.map((w) => ({ uid: w.uid, width: r3(w.width), height: r3(w.height), depth: r3(w.depth), x: r3(w.x), y: r3(w.y), z: r3(w.z), r: r3(w.r || 0) }));
       
       const uidByPhoto = {};
@@ -1126,7 +1131,7 @@ export default function GalleryEditor() {
       const res = await fetch('/api/layout', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ frames: payloadFrames, walls: payloadWalls, objects: payloadObjects, photoSlots })
+        body: JSON.stringify({ frames: payloadFrames, walls: payloadWalls, objects: payloadObjects, lighting, photoSlots })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showToast(data.error || 'فشل الحفظ', 'err'); setSaving(false); return; }
@@ -1227,6 +1232,7 @@ export default function GalleryEditor() {
       <Head>
         <title>محرر الصالة والجدران — لوحة الإدارة</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="stylesheet" href={FONTS_CSS_HREF} />
       </Head>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
@@ -1250,6 +1256,17 @@ export default function GalleryEditor() {
         {isDefault && <div className="note">التخطيط الحالي افتراضي ولم يُحفظ بعد في قاعدة البيانات.</div>}
 
         <section>
+          <div className="lightbox" style={{ margin: '8px 0', padding: '10px', border: '1px solid rgba(255,255,255,.12)', borderRadius: '10px' }}>
+            <b style={{ fontSize: '13px' }}>💡 التحكم بالإضاءة</b>
+            {[['ambient', 'الإضاءة العامة', 0.2, 2], ['lamps', 'لمبات السقف', 0, 2], ['led', 'توهّج LED حول الإطارات', 0, 2]].map(([k, label, mn, mx]) => (
+              <label key={k} className="nf" style={{ display: 'block', marginTop: '8px' }}>
+                <span>{label} ({Math.round((lighting[k] || 0) * 100)}%)</span>
+                <input type="range" min={mn} max={mx} step="0.05" value={lighting[k]} onChange={(e) => { setLighting((l) => ({ ...l, [k]: parseFloat(e.target.value) })); setDirty(true); }} style={{ width: '100%' }} />
+              </label>
+            ))}
+            <button className="btn" style={{ marginTop: '8px' }} onClick={() => { setLighting(DEFAULT_LIGHTING); setDirty(true); }}>إعادة الإضاءة الافتراضية</button>
+            <small style={{ display: 'block', opacity: 0.65, marginTop: '6px' }}>الإضاءة العامة تظهر فوراً هنا؛ لمبات السقف وLED تظهر في المعرض العام بعد الحفظ.</small>
+          </div>
           <label className="check"><input type="checkbox" checked={carry} onChange={(e) => setCarry(e.target.checked)} /> تحريك الجدار مع لوحاته ومجسماته</label>
           <div className="row" style={{ marginTop: 0 }}>
             <button className={'btn' + (multiMode ? ' on' : '')} onClick={() => setMultiMode((v) => !v)}>☑ تحديد متعدد{multiMode ? ' (مفعّل)' : ''}</button>
@@ -1313,6 +1330,23 @@ export default function GalleryEditor() {
                   <span>النص (عربي)</span>
                   <div className="nfbox"><input dir="rtl" maxLength={80} value={selObjObj.text || ''} onChange={(e) => updateObj(selObjObj.uid, { text: e.target.value }, 'txt:' + selObjObj.uid)} /></div>
                 </label>
+                <label className="nf">
+                  <span>الخط</span>
+                  <select value={selObjObj.font || 'system'} onChange={(e) => updateObj(selObjObj.uid, { font: e.target.value }, 'fnt:' + selObjObj.uid)} style={{ fontFamily: (TEXT_FONTS[selObjObj.font || 'system'] || {}).family }}>
+                    {Object.entries(TEXT_FONTS).map(([k, f]) => <option key={k} value={k} style={{ fontFamily: f.family }}>{f.label}</option>)}
+                  </select>
+                </label>
+                <label className="nf">
+                  <span>تأطير / حدّ للحروف ({selObjObj.stroke || 0})</span>
+                  <input type="range" min="0" max="8" step="0.5" value={selObjObj.stroke || 0} onChange={(e) => updateObj(selObjObj.uid, { stroke: parseFloat(e.target.value) }, 'stk:' + selObjObj.uid)} />
+                </label>
+                {(selObjObj.stroke || 0) > 0 && (
+                  <label className="nf">
+                    <span>لون الحد</span>
+                    <input type="color" value={selObjObj.strokeColor || '#1d1a14'} onChange={(e) => updateObj(selObjObj.uid, { strokeColor: e.target.value }, 'stc:' + selObjObj.uid)} style={{ height: '36px', padding: '2px' }} />
+                  </label>
+                )}
+                <label className="check"><input type="checkbox" checked={!!selObjObj.shadow} onChange={(e) => updateObj(selObjObj.uid, { shadow: e.target.checked }, 'shd:' + selObjObj.uid)} /> ظل خلف النص</label>
                 <label className="nf">
                   <span>اللون</span>
                   <input type="color" value={selObjObj.color || '#c9a35b'} onChange={(e) => updateObj(selObjObj.uid, { color: e.target.value }, 'col:' + selObjObj.uid)} style={{ height: '36px', padding: '2px' }} />
