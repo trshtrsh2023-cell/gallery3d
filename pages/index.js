@@ -686,7 +686,7 @@ export default function Home() {
         camera.rotation.x = state.pitch;
 
         if (!fullscreenOpen && !paused) {
-          const speed = 0.4;
+          const speed = 0.50;
           const forward = new window.THREE.Vector3(-Math.sin(state.yaw), 0, -Math.cos(state.yaw));
           const right = new window.THREE.Vector3(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
 
