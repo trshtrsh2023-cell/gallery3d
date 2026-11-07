@@ -380,12 +380,12 @@ export default function Home() {
             state.joy.dx = 0; state.joy.dy = 0; state.joy.mag = 0;
             const jw = document.getElementById('joyWrap');
             if (jw) {
-              jw.style.left = (t.clientX - 55) + 'px';
-              jw.style.top = (t.clientY - 55) + 'px';
+              jw.style.left = (t.clientX - 58) + 'px';
+              jw.style.top = (t.clientY - 58) + 'px';
               jw.style.bottom = 'auto';
               jw.style.display = 'block';
             }
-            if (joyKnob) { joyKnob.style.left = '31px'; joyKnob.style.top = '31px'; }
+            if (joyKnob) joyKnob.style.transform = 'translate(0,0)';
           } else if (!state.look.a) {
             state.look.a = true;
             state.look.id = t.identifier;
@@ -401,16 +401,15 @@ export default function Home() {
           if (tp && Math.hypot(t.clientX - tp.x, t.clientY - tp.y) > 8) tp.moved = true;
           if (state.joy.a && t.identifier === state.joy.id) {
             let dx = t.clientX - state.joy.cx, dy = t.clientY - state.joy.cy;
-            const R = 55, len = Math.hypot(dx, dy);
+            const R = 58, len = Math.hypot(dx, dy);
             // داخل الدائرة: بطيء تدريجي — خارجها بالكامل: سريع
             state.joy.mag = len <= R ? 0.4 * (len / R) : 1;
             state.joy.dx = len > 0 ? dx / len : 0;
             state.joy.dy = len > 0 ? dy / len : 0;
-            const kmax = 31;
+            const kmax = 48;
             if (len > kmax) { dx = dx / len * kmax; dy = dy / len * kmax; }
             if (joyKnob) {
-              joyKnob.style.left = (31 + dx) + 'px';
-              joyKnob.style.top = (31 + dy) + 'px';
+              joyKnob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
             }
           }
           if (state.look.a && t.identifier === state.look.id) {
@@ -980,9 +979,9 @@ export default function Home() {
         </div>
       </div>
 
-      <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, pointerEvents: 'none', display: 'none', opacity: 0.3 }}>
-        <div id="joyZone" style={{ width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(30, 25, 20, .42)', border: '1px solid rgba(255, 255, 255, .32)', position: 'relative', touchAction: 'none', pointerEvents: 'none' }}>
-          <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .95)', position: 'absolute', top: '31px', left: '31px', pointerEvents: 'none' }}></div>
+      <div id="joyWrap" style={{ position: 'fixed', left: '18px', bottom: '18px', zIndex: 300, pointerEvents: 'none', display: 'none' }}>
+        <div id="joyZone" style={{ position: 'relative', width: '116px', height: '116px', borderRadius: '50%', background: 'rgba(15,23,42,.55)', border: '1.5px solid rgba(255,255,255,.35)', touchAction: 'none', pointerEvents: 'none', boxSizing: 'border-box' }}>
+          <div id="joyKnob" style={{ position: 'absolute', left: '34px', top: '34px', width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(56,189,248,.9)', pointerEvents: 'none' }}></div>
         </div>
       </div>
 
