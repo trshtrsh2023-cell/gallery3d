@@ -25,8 +25,8 @@ function writeSession(name, prev) {
 function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch (e) {} }
 
 export default function Home() {
-  const [photos, setPhotos] = useState(null);   // null = لم تُحمَّل بعد (مصفوفة فارغة = لا صور بعد، فتظهر كل الإطارات فارغة)
-  const [layout, setLayout] = useState(null);   // تخطيط الإطارات والجدران من /api/layout (null = لم يُحمَّل بعد)
+  const [photos, setPhotos] = useState(null);
+  const [layout, setLayout] = useState(null);
   const [visitorName, setVisitorName] = useState('');
   const [entering, setEntering] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -34,7 +34,7 @@ export default function Home() {
   const [presence, setPresence] = useState({ count: 0, names: [] });
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [autoSession, setAutoSession] = useState(null); // جلسة محفوظة صالحة => دخول تلقائي
+  const [autoSession, setAutoSession] = useState(null);
   const [sessionNotice, setSessionNotice] = useState('');
   const presenceTimerRef = useRef(null);
   const sessionTimerRef = useRef(null);
@@ -118,14 +118,26 @@ export default function Home() {
     let disposed = false;
     let cleanupFn = null;
 
+    const loadNippleAndInit = () => {
+      if (!window.nipplejs) {
+        const scriptNipple = document.createElement('script');
+        scriptNipple.src = 'https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js';
+        scriptNipple.async = true;
+        scriptNipple.onload = () => { if (!disposed) cleanupFn = initGallery(photos, layout); };
+        document.body.appendChild(scriptNipple);
+      } else {
+        if (!disposed) cleanupFn = initGallery(photos, layout);
+      }
+    };
+
     if (!window.THREE) {
       const script = document.createElement('script');
       script.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
       script.async = true;
-      script.onload = () => { if (!disposed) cleanupFn = initGallery(photos, layout); };
+      script.onload = () => { loadNippleAndInit(); };
       document.body.appendChild(script);
     } else {
-      cleanupFn = initGallery(photos, layout);
+      loadNippleAndInit();
     }
 
     return () => {
@@ -136,15 +148,15 @@ export default function Home() {
     function initGallery(activePhotos, layoutData) {
       'use strict';
       const EYE_HEIGHT = 1.5;
-      const SHOW_DIST = 3.5;   // مسافة ظهور لوحة المعلومات الزجاجية
-      const OPEN_DIST = 3.5;   // مسافة السماح بفتح الصورة بالتكبير (مترين)
+      const SHOW_DIST = 3.5;
+      const OPEN_DIST = 3.5;
 
       const frames = layoutData.frames || DEFAULT_FRAMES;
       const customWalls = layoutData.walls;
 
-      const MAT_PADDING = FRAME_STYLE.PAD;       // هامش الإطار حول الصورة
-      const FRAME_DEPTH = FRAME_STYLE.DEPTH;     // سُمك الإطار (نصفه مغروس داخل الجدار)
-      const IMAGE_OFFSET = FRAME_STYLE.IMAGE_OFFSET; // إزاحة الصورة أمام وجه الإطار مباشرة
+      const MAT_PADDING = FRAME_STYLE.PAD;
+      const FRAME_DEPTH = FRAME_STYLE.DEPTH;
+      const IMAGE_OFFSET = FRAME_STYLE.IMAGE_OFFSET;
 
       function createWoodTexture() {
         const canvas = document.createElement('canvas');
@@ -177,7 +189,7 @@ export default function Home() {
       const state = {
         yaw: 0, pitch: 0,
         keys: { w: false, s: false, a: false, d: false },
-        joy: { a: false, id: null, cx: 0, cy: 0, dx: 0, dy: 0 },
+        joy: { a: false, dx: 0, dy: 0 },
         look: { a: false, id: null, lx: 0, ly: 0 },
         mouseLook: false,
         lastMouseX: 0,
@@ -187,6 +199,7 @@ export default function Home() {
       };
 
       let scene, camera, renderer, hitGroups = [], fullscreenOpen = false, panelTarget = null, rafId = null, paused = false;
+      let joystickManager = null;
 
       const host = document.getElementById('canvasHost');
       if (!host) return () => {};
@@ -195,7 +208,6 @@ export default function Home() {
       scene = new window.THREE.Scene();
       scene.background = new window.THREE.Color(0x141210);
       
-      // رفع نطاق الرؤية الأقصى (far) إلى 500 لتفادي اختفاء الجدران أو الأسقف السميكة جداً
       camera = new window.THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
       camera.position.set(0, EYE_HEIGHT, 14);
       camera.rotation.order = 'YXZ';
@@ -225,23 +237,14 @@ export default function Home() {
       wallTex.repeat.set(4, 2);
       const wallMat = new window.THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.8 });
 
-      // مصفوفة لحفظ الجدران وتفعيل نظام منع العبور من خلالها (Collision Detection)
       const wallColliders = [];
 
-      // رسم الجدران: الاعتماد على الجدران المخصصة إن وجدت، وإلا فالافتراضية
       const activeWalls = (customWalls && customWalls.length > 0)
         ? customWalls
         : ROOM_WALLS.map((w, i) => ({
             uid: 'w' + (i + 1),
-            width: w[0],
-            height: w[1],
-            depth: w[2],
-            x: w[3],
-            y: w[4],
-            z: w[5],
-            r: w[6] || 0,
-            rx: 0,
-            rz: 0
+            width: w[0], height: w[1], depth: w[2],
+            x: w[3], y: w[4], z: w[5], r: w[6] || 0, rx: 0, rz: 0
           }));
 
       activeWalls.forEach((w) => {
@@ -261,7 +264,7 @@ export default function Home() {
         m.rotation.x = wRx;
         m.rotation.z = wRz;
         scene.add(m);
-        wallColliders.push(m); // حفظ الجدار لفحص الاصطدام ومنع العبور
+        wallColliders.push(m);
       });
 
       const loader = new window.THREE.TextureLoader();
@@ -361,52 +364,53 @@ export default function Home() {
       window.addEventListener('mousemove', onMouseMove);
       window.addEventListener('mouseup', onMouseUp);
 
-      // --- تحكم اللمس (الجوالات) ---
-      const joyZone = document.getElementById('joyZone');
-      const joyKnob = document.getElementById('joyKnob');
+      // --- تهيئة NippleJS للجويستيك ---
+      const joyZone = document.getElementById('joyWrap');
+      if (window.nipplejs && joyZone) {
+        joyZone.innerHTML = '';
+        joystickManager = window.nipplejs.create({
+          zone: joyZone,
+          mode: 'static',
+          position: { left: '60px', bottom: '60px' },
+          color: '#c9a35b',
+          size: 110
+        });
 
+        joystickManager.on('move', (evt, data) => {
+          if (data && data.vector) {
+            state.joy.a = true;
+            state.joy.dx = data.vector.x;
+            state.joy.dy = data.vector.y;
+          }
+        });
+
+        joystickManager.on('end', () => {
+          state.joy.a = false;
+          state.joy.dx = 0;
+          state.joy.dy = 0;
+        });
+      }
+
+      // --- تحكم اللمس (التدوير والنقر للوحات) ---
       function onTouchStart(e) {
         if (fullscreenOpen || paused) return;
         for (const t of e.changedTouches) {
-          // التحقق مما إذا كانت اللمسة في المنطقة الـ 30% اليسرى من الشاشة
-          if (!state.joy.a && t.clientX < window.innerWidth * 0.3) {
-            state.joy.a = true;
-            state.joy.id = t.identifier;
-            state.joy.cx = t.clientX;
-            state.joy.cy = t.clientY;
-            
-            if (joyZone) {
-              joyZone.style.display = 'block';
-              joyZone.style.left = t.clientX + 'px';
-              joyZone.style.top = t.clientY + 'px';
+          if (t.clientX > 160 || t.clientY < window.innerHeight - 160) {
+            if (!state.look.a) {
+              state.look.a = true;
+              state.look.id = t.identifier;
+              state.look.lx = t.clientX;
+              state.look.ly = t.clientY;
             }
-            if (joyKnob) joyKnob.style.transform = 'translate(0px, 0px)';
-          } 
-          // إذا لم تكن للحركة، فهي للنظر (تدوير الكاميرا)
-          else if (!state.look.a) {
-            state.look.a = true;
-            state.look.id = t.identifier;
-            state.look.lx = t.clientX;
-            state.look.ly = t.clientY;
           }
           state.tap[t.identifier] = { x: t.clientX, y: t.clientY, moved: false };
         }
       }
+
       function onTouchMove(e) {
         for (const t of e.changedTouches) {
           const tp = state.tap[t.identifier];
           if (tp && Math.hypot(t.clientX - tp.x, t.clientY - tp.y) > 8) tp.moved = true;
-          
-          if (state.joy.a && t.identifier === state.joy.id) {
-            let dx = t.clientX - state.joy.cx, dy = t.clientY - state.joy.cy;
-            const max = 40, len = Math.hypot(dx, dy);
-            if (len > max) { dx = dx / len * max; dy = dy / len * max; }
-            state.joy.dx = dx / max;
-            state.joy.dy = dy / max;
-            if (joyKnob) {
-              joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
-            }
-          }
           
           if (state.look.a && t.identifier === state.look.id) {
             state.yaw -= (t.clientX - state.look.lx) * 0.0035;
@@ -417,6 +421,7 @@ export default function Home() {
           }
         }
       }
+
       function onTouchEnd(e) {
         for (const t of e.changedTouches) {
           const tp = state.tap[t.identifier];
@@ -424,15 +429,10 @@ export default function Home() {
             triggerRaycast(t.clientX, t.clientY);
           }
           delete state.tap[t.identifier];
-          
-          if (state.joy.a && t.identifier === state.joy.id) {
-            state.joy.a = false;
-            state.joy.dx = 0; state.joy.dy = 0;
-            if (joyZone) joyZone.style.display = 'none';
-          }
           if (state.look.a && t.identifier === state.look.id) state.look.a = false;
         }
       }
+
       renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: true });
       renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: true });
       renderer.domElement.addEventListener('touchend', onTouchEnd);
@@ -522,7 +522,6 @@ export default function Home() {
           const forward = new window.THREE.Vector3(-Math.sin(state.yaw), 0, -Math.cos(state.yaw));
           const right = new window.THREE.Vector3(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
 
-          // 1. حفظ الموقع القديم للزائر قبل التحرك
           const oldPos = camera.position.clone();
 
           let displacement = new window.THREE.Vector3(0, 0, 0);
@@ -533,20 +532,18 @@ export default function Home() {
           if (state.keys.d) { displacement.addScaledVector(right, speed); hasKeyMove = true; }
           if (hasKeyMove) camera.position.add(displacement);
 
-          // تحديث الحركة بناءً على الجويستيك الديناميكي
+          // تحديث الحركة بناءً على NippleJS
           if (state.joy.a) {
             const joyMagnitude = Math.hypot(state.joy.dx, state.joy.dy);
-            if (joyMagnitude > 0.1) {
-              // الحركة للأمام والخلف والخلف بناءً على اتجاه الكاميرا
-              const moveDir = forward.clone().multiplyScalar(-state.joy.dy).add(right.clone().multiplyScalar(state.joy.dx));
+            if (joyMagnitude > 0.05) {
+              const moveDir = forward.clone().multiplyScalar(state.joy.dy).add(right.clone().multiplyScalar(state.joy.dx));
               moveDir.normalize();
               camera.position.addScaledVector(moveDir, speed * joyMagnitude);
             }
           }
 
-          // 2. نظام منع العبور من خلال الجدران (Collision Detection)
           let collided = false;
-          const playerRadius = 0.35; // مسافة أمان حول الزائر لمنع الالتصاق المباشر
+          const playerRadius = 0.35;
 
           for (const wallMesh of wallColliders) {
             const box = new window.THREE.Box3().setFromObject(wallMesh);
@@ -559,7 +556,6 @@ export default function Home() {
             }
           }
 
-          // إذا حاول الزائر اختراق الجدار، يتم إرجاعه فوراً لموقعه السابق
           if (collided) {
             camera.position.copy(oldPos);
           }
@@ -601,6 +597,7 @@ export default function Home() {
 
       return function cleanup() {
         if (rafId) cancelAnimationFrame(rafId);
+        if (joystickManager) joystickManager.destroy();
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
         window.removeEventListener('mousemove', onMouseMove);
@@ -641,7 +638,6 @@ export default function Home() {
       clearInterval(presenceTimerRef.current);
       presenceTimerRef.current = null;
     }
-    // نُبلغ الخادم بالمغادرة فوراً حتى لا يبقى الزائر "متواجداً" بعد خروجه
     fetch('/api/presence', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -651,19 +647,19 @@ export default function Home() {
 
   function showEntry(show) {
     const entry = document.getElementById('entryOverlay');
-    const joyZone = document.getElementById('joyZone');
+    const joyWrap = document.getElementById('joyWrap');
     const lookHint = document.getElementById('lookHintMobile');
     if (entry) entry.style.display = show ? 'flex' : 'none';
     if (!show && isMobile) {
+      if (joyWrap) joyWrap.style.display = 'block';
       if (lookHint) lookHint.style.display = 'block';
     }
     if (show) {
-      if (joyZone) joyZone.style.display = 'none';
+      if (joyWrap) joyWrap.style.display = 'none';
       if (lookHint) lookHint.style.display = 'none';
     }
   }
 
-  // انتهاء جلسة الـ٣ ساعات: تُزال بيانات الدخول من المتصفح ويعود الزائر للصفحة الرئيسية
   function expireSession() {
     clearSession();
     if (sessionTimerRef.current) { clearTimeout(sessionTimerRef.current); sessionTimerRef.current = null; }
@@ -675,14 +671,12 @@ export default function Home() {
     setSessionNotice('انتهت جلسة دخولك (٣ ساعات). أدخل اسمك للمتابعة.');
   }
 
-  // auto = دخول تلقائي بجلسة محفوظة (لا يُسجَّل كزيارة جديدة)
   async function doEnter(name, auto) {
     setEntering(true);
     setSessionNotice('');
     const prev = readSession();
     const sameSession = prev && prev.name === name ? prev : null;
     if (!sameSession) {
-      // دخول جديد => يُسجَّل في سجل الزوار مرة واحدة طوال مدة الجلسة
       try {
         let model = null;
         try {
@@ -723,13 +717,10 @@ export default function Home() {
     await doEnter(name, false);
   }
 
-  // الدخول التلقائي عند وجود جلسة محفوظة صالحة
   useEffect(() => {
     if (autoSession) doEnter(autoSession.name, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSession]);
 
-  // تسجيل خروج الزائر: يمسح الجلسة المحفوظة ويعيده لصفحة إدخال الاسم
   function handleVisitorLogout() {
     setMenuOpen(false);
     clearSession();
@@ -744,10 +735,10 @@ export default function Home() {
   function handleExitToHome() {
     setMenuOpen(false);
     const entry = document.getElementById('entryOverlay');
-    const joyZone = document.getElementById('joyZone');
+    const joyWrap = document.getElementById('joyWrap');
     const lookHint = document.getElementById('lookHintMobile');
     if (entry) entry.style.display = 'flex';
-    if (joyZone) joyZone.style.display = 'none';
+    if (joyWrap) joyWrap.style.display = 'none';
     if (lookHint) lookHint.style.display = 'none';
     window.dispatchEvent(new Event('gallery:pause'));
     stopPresenceHeartbeat();
@@ -979,10 +970,8 @@ export default function Home() {
         </div>
       </div>
 
-      {/* جويستيك الحركة الديناميكي - يظهر فقط عند لمس الجهة اليسرى */}
-      <div id="joyZone" style={{ position: 'fixed', width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(30, 25, 20, .42)', border: '1px solid rgba(255, 255, 255, .32)', zIndex: 300, display: 'none', opacity: 0.5, transform: 'translate(-50%, -50%)', touchAction: 'none', pointerEvents: 'none' }}>
-        <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .95)', position: 'absolute', top: '50%', left: '50%', marginTop: '-24px', marginLeft: '-24px', pointerEvents: 'none', transition: 'transform 0.05s linear' }}></div>
-      </div>
+      {/* حاوية nipplejs للجويستيك */}
+      <div id="joyWrap" style={{ position: 'fixed', left: '20px', bottom: '20px', width: '130px', height: '130px', zIndex: 300, display: 'none', touchAction: 'none' }}></div>
 
       <div id="lookHintMobile" style={{ position: 'fixed', right: '20px', bottom: '26px', zIndex: 300, display: 'none', color: 'rgba(255, 255, 255, .7)', fontSize: '12px', background: 'rgba(0, 0, 0, .5)', padding: '8px 12px', borderRadius: '8px', pointerEvents: 'none' }}>
         جاهزيةالمعرض 65%
