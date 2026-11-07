@@ -373,7 +373,7 @@ export default function Home() {
           // الجويستيك العائم: لمس في أول 30% من يسار الشاشة => يظهر مكان اللمس
           const isNearJoystick = t.clientX < window.innerWidth * 0.3;
           if (isNearJoystick && !state.joy.a) {
-            state.joy.a = true;
+            state.joy.a = true; 
             state.joy.id = t.identifier;
             state.joy.cx = t.clientX;
             state.joy.cy = t.clientY;
