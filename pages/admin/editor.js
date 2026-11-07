@@ -604,6 +604,30 @@ function NumField({ label, value, onChange, step = 0.05, digits = 2, suffix }) {
   );
 }
 
+
+// اللوحات المرتبطة بجدار: القريبة من وجهَيه (ضمن حدوده). عند نقل/تدوير الجدار تُنقل وتُدار معه.
+function carryFramesWithWall(frames, oldW, newW) {
+  const dr = (newW.r || 0) - (oldW.r || 0);
+  if (!dr && newW.x === oldW.x && newW.y === oldW.y && newW.z === oldW.z) return frames;
+  const co = Math.cos(oldW.r || 0), so = Math.sin(oldW.r || 0);
+  const cn = Math.cos(newW.r || 0), sn = Math.sin(newW.r || 0);
+  return frames.map((f) => {
+    const px = f.x - oldW.x, pz = f.z - oldW.z;
+    // إحداثيات محلية بالنسبة للجدار القديم (عكس الدوران)
+    const lx = px * co - pz * so;
+    const lz = px * so + pz * co;
+    const near = Math.abs(lx) <= oldW.width / 2 + 0.5 && Math.abs(lz) <= oldW.depth / 2 + 0.5 && Math.abs(f.y - oldW.y) <= oldW.height / 2 + 0.5;
+    if (!near) return f;
+    return {
+      ...f,
+      x: r3(newW.x + lx * cn + lz * sn),
+      z: r3(newW.z - lx * sn + lz * cn),
+      y: r3(f.y + (newW.y - oldW.y)),
+      r: r3((f.r || 0) + dr)
+    };
+  });
+}
+
 export default function GalleryEditor() {
   const router = useRouter();
   const hostRef = useRef(null);
@@ -767,10 +791,20 @@ export default function GalleryEditor() {
     setDirty(true);
   };
 
+  const applyWallPatch = (uid, patch) => {
+    const oldW = live.current.walls.find((w) => w.uid === uid);
+    if (!oldW) return;
+    const newW = { ...oldW, ...patch };
+    const nf = carryFramesWithWall(live.current.frames, oldW, newW);
+    if (nf !== live.current.frames) { live.current.frames = nf; setFrames(nf); }
+    live.current.walls = live.current.walls.map((w) => (w.uid === uid ? newW : w));
+    setWalls((ws) => ws.map((w) => (w.uid === uid ? newW : w)));
+    setDirty(true);
+  };
+
   const updateWall = (uid, patch, key) => {
     pushUndo(key || ('w:' + uid + ':' + Object.keys(patch).join(',')));
-    setWalls((ws) => ws.map((w) => (w.uid === uid ? { ...w, ...patch } : w)));
-    setDirty(true);
+    applyWallPatch(uid, patch);
   };
 
   const addWall = () => {
@@ -930,7 +964,7 @@ export default function GalleryEditor() {
   cbRef.current = {
     beginGesture: () => pushUndo(),
     moveFrame: (uid, p) => { setFrames((fs) => fs.map((f) => (f.uid === uid ? { ...f, ...p } : f))); setDirty(true); },
-    moveWall: (uid, p) => { setWalls((ws) => ws.map((w) => (w.uid === uid ? { ...w, ...p } : w))); setDirty(true); }
+    moveWall: (uid, p) => applyWallPatch(uid, p)
   };
 
   useEffect(() => {

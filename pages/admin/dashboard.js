@@ -290,7 +290,7 @@ export default function AdminDashboard() {
     });
 
   // ---- سجل النشاط: تصفية + تصدير ----
-  const CAT_LABEL = { auth: 'الدخول والخروج', photo: 'اللوحات', layout: 'تعديل المعرض', admin: 'الحسابات' };
+  const CAT_LABEL = { auth: 'الدخول والخروج', photo: 'اللوحات', layout: 'تعديل المعرض', admin: 'الحسابات', chat: 'الدردشة' };
   const logAdmins = useMemo(() => [...new Set(logs.map((l) => l.admin_username).filter(Boolean))], [logs]);
   const filteredLogs = useMemo(() => {
     const now = Date.now();

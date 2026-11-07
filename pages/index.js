@@ -36,6 +36,18 @@ export default function Home() {
   const [isMobile, setIsMobile] = useState(false);
   const [autoSession, setAutoSession] = useState(null); // جلسة محفوظة صالحة => دخول تلقائي
   const [sessionNotice, setSessionNotice] = useState('');
+  // الدردشة العامة المؤقتة
+  const [chatEnabled, setChatEnabled] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMsgs, setChatMsgs] = useState([]);
+  const [chatText, setChatText] = useState('');
+  const [chatErr, setChatErr] = useState('');
+  const [chatSending, setChatSending] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
+  const chatLastIdRef = useRef(0);
+  const chatOpenRef = useRef(false);
+  const chatListRef = useRef(null);
+  const [chatIsAdmin, setChatIsAdmin] = useState(false);
   const presenceTimerRef = useRef(null);
   const sessionTimerRef = useRef(null);
   const sessionIdRef = useRef(null);
@@ -264,8 +276,156 @@ export default function Home() {
         wallColliders.push(m); // حفظ الجدار لفحص الاصطدام ومنع العبور
       });
 
+
+      // ===== السقف والإضاءة والمجسمات الزخرفية =====
+      const THREE_ = window.THREE;
+      {
+        let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, ceilY = 0;
+        activeWalls.forEach((w) => {
+          const ext = Math.max(w.width || 0, w.depth || 0) / 2;
+          minX = Math.min(minX, (w.x || 0) - ext); maxX = Math.max(maxX, (w.x || 0) + ext);
+          minZ = Math.min(minZ, (w.z || 0) - ext); maxZ = Math.max(maxZ, (w.z || 0) + ext);
+          ceilY = Math.max(ceilY, (w.y || 0) + (w.height || 0) / 2);
+        });
+        if (!isFinite(minX)) { minX = -15; maxX = 15; minZ = -15; maxZ = 15; ceilY = 6; }
+        // سقف يظهر من الداخل فقط (لا يحجب التصوير من الأعلى)
+        const ceil = new THREE_.Mesh(
+          new THREE_.PlaneGeometry(maxX - minX, maxZ - minZ),
+          new THREE_.MeshStandardMaterial({ color: 0xe9e4da, roughness: 0.95 })
+        );
+        ceil.rotation.x = Math.PI / 2;
+        ceil.position.set((minX + maxX) / 2, ceilY, (minZ + maxZ) / 2);
+        scene.add(ceil);
+
+        // لمبات سقف غائرة بشبكة منتظمة
+        const lampMat = new THREE_.MeshBasicMaterial({ color: 0xfff0cf });
+        const ringMat = new THREE_.MeshStandardMaterial({ color: 0x2a2724, roughness: 0.6 });
+        const lampGeo = new THREE_.CylinderGeometry(0.2, 0.2, 0.03, 20);
+        const ringGeo = new THREE_.CylinderGeometry(0.27, 0.27, 0.05, 20);
+        const spots = [];
+        const step = 4.5;
+        for (let x = minX + 2.5; x <= maxX - 2; x += step) {
+          for (let z = minZ + 2.5; z <= maxZ - 2; z += step) {
+            if (spots.length >= 48) break;
+            spots.push([x, z]);
+            const ring = new THREE_.Mesh(ringGeo, ringMat);
+            ring.position.set(x, ceilY - 0.02, z);
+            scene.add(ring);
+            const lamp = new THREE_.Mesh(lampGeo, lampMat);
+            lamp.position.set(x, ceilY - 0.045, z);
+            scene.add(lamp);
+          }
+        }
+        // عدد محدود من الإضاءة الفعلية للحفاظ على الأداء على الجوال
+        const nLights = Math.min(5, spots.length);
+        for (let i = 0; i < nLights; i++) {
+          const sp = spots[Math.floor((i + 0.5) * spots.length / nLights)];
+          const pl = new THREE_.PointLight(0xfff0d8, 0.32, 20, 1.4);
+          pl.position.set(sp[0], ceilY - 0.6, sp[1]);
+          scene.add(pl);
+        }
+
+        // مجسمات: مزهريات ونباتات عند أطراف الجدران
+        const vaseMat = new THREE_.MeshStandardMaterial({ color: 0x2f5d62, roughness: 0.35, metalness: 0.15 });
+        const vase2Mat = new THREE_.MeshStandardMaterial({ color: 0xc8b79a, roughness: 0.5 });
+        const potMat = new THREE_.MeshStandardMaterial({ color: 0x3b2f27, roughness: 0.8 });
+        const leafMats = [0x3f7d3a, 0x57963f, 0x2f6a35].map((c) => new THREE_.MeshStandardMaterial({ color: c, roughness: 0.8 }));
+        const vaseGeo = new THREE_.LatheGeometry([
+          [0.00, 0.00], [0.16, 0.00], [0.24, 0.12], [0.27, 0.32], [0.20, 0.55], [0.11, 0.72], [0.13, 0.82], [0.17, 0.88]
+        ].map((q) => new THREE_.Vector2(q[0], q[1])), 18);
+        const potGeo = new THREE_.CylinderGeometry(0.3, 0.22, 0.45, 16);
+        const bladeGeo = new THREE_.ConeGeometry(0.045, 0.9, 4);
+        const fernGeo = new THREE_.ConeGeometry(0.1, 0.7, 5);
+
+        function makeVase(mat, flowers) {
+          const g = new THREE_.Group();
+          g.add(new THREE_.Mesh(vaseGeo, mat));
+          if (flowers) {
+            for (let i = 0; i < 7; i++) {
+              const a = (i / 7) * Math.PI * 2;
+              const stem = new THREE_.Mesh(new THREE_.CylinderGeometry(0.012, 0.012, 0.7, 5), leafMats[2]);
+              stem.position.set(Math.cos(a) * 0.07, 1.15, Math.sin(a) * 0.07);
+              stem.rotation.set(Math.sin(a) * 0.35, 0, -Math.cos(a) * 0.35);
+              g.add(stem);
+              const bloom = new THREE_.Mesh(new THREE_.SphereGeometry(0.06, 8, 6), new THREE_.MeshStandardMaterial({ color: [0xd94f6a, 0xf0b13c, 0xf4efe6][i % 3], roughness: 0.6 }));
+              bloom.position.set(Math.cos(a) * 0.22, 1.47, Math.sin(a) * 0.22);
+              g.add(bloom);
+            }
+          }
+          return g;
+        }
+        function makePlant() {
+          const g = new THREE_.Group();
+          const pot = new THREE_.Mesh(potGeo, potMat); pot.position.y = 0.225; g.add(pot);
+          const soil = new THREE_.Mesh(new THREE_.CylinderGeometry(0.28, 0.28, 0.02, 14), new THREE_.MeshStandardMaterial({ color: 0x1d1612 }));
+          soil.position.y = 0.45; g.add(soil);
+          for (let i = 0; i < 16; i++) {
+            const a = (i / 16) * Math.PI * 2 + (i % 2) * 0.2;
+            const rad = 0.04 + (i % 4) * 0.045;
+            const blade = new THREE_.Mesh(i % 3 === 0 ? fernGeo : bladeGeo, leafMats[i % 3]);
+            const hh = (i % 3 === 0 ? 0.7 : 0.9) * (0.8 + (i % 5) * 0.12);
+            blade.scale.y = hh / (i % 3 === 0 ? 0.7 : 0.9);
+            blade.position.set(Math.cos(a) * rad, 0.45 + hh / 2, Math.sin(a) * rad);
+            blade.rotation.set(Math.sin(a) * 0.32, 0, -Math.cos(a) * 0.32);
+            g.add(blade);
+          }
+          return g;
+        }
+
+        // تحويل نقطة لإحداثيات جدار محلية للتأكد من أن المكان خالٍ
+        const insideAnyWall = (px, pz, margin, self) => activeWalls.some((w) => {
+          if (w === self) return false;
+          const c = Math.cos(w.r || 0), sn = Math.sin(w.r || 0);
+          const dx = px - (w.x || 0), dz = pz - (w.z || 0);
+          const lx = dx * c - dz * sn, lz = dx * sn + dz * c;
+          return Math.abs(lx) <= (w.width || 0) / 2 + margin && Math.abs(lz) <= (w.depth || 0) / 2 + margin;
+        });
+        let propCount = 0, kind = 0;
+        activeWalls.forEach((w) => {
+          if (propCount >= 18) return;
+          const wr = w.r || 0, c = Math.cos(wr), sn = Math.sin(wr);
+          const alongX = (w.width || 0) >= (w.depth || 0);
+          const L = alongX ? w.width : w.depth;
+          const T = alongX ? w.depth : w.width;
+          if (L < 2.5) return;
+          const offs = L > 14 ? [-L / 2 + 1.0, 0, L / 2 - 1.0] : L > 6 ? [-L / 2 + 1.0, L / 2 - 1.0] : [0];
+          offs.forEach((o) => {
+            if (propCount >= 18) return;
+            for (const side of [1, -1]) {
+              const lx = alongX ? o : side * (T / 2 + 0.55);
+              const lz = alongX ? side * (T / 2 + 0.55) : o;
+              // من المحلي إلى العالمي (دوران Y)
+              const px = (w.x || 0) + lx * c + lz * sn;
+              const pz = (w.z || 0) - lx * sn + lz * c;
+              if (insideAnyWall(px, pz, 0.6, w)) continue;
+              const obj = kind % 3 === 0 ? makePlant() : kind % 3 === 1 ? makeVase(vaseMat, true) : makeVase(vase2Mat, false);
+              obj.position.set(px, 0, pz);
+              obj.rotation.y = (propCount * 1.7) % 6.28;
+              scene.add(obj);
+              kind++; propCount++;
+              break;
+            }
+          });
+        });
+      }
+
       const loader = new window.THREE.TextureLoader();
       const { byFrame } = assignPhotosToFrames(activePhotos, frames);
+
+
+      // توهّج LED مخفي خلف كل إطار
+      const ledCanvas = document.createElement('canvas');
+      ledCanvas.width = 128; ledCanvas.height = 128;
+      {
+        const cx = ledCanvas.getContext('2d');
+        const gr = cx.createRadialGradient(64, 64, 20, 64, 64, 64);
+        gr.addColorStop(0, 'rgba(255,214,150,0.0)');
+        gr.addColorStop(0.55, 'rgba(255,205,135,0.55)');
+        gr.addColorStop(1, 'rgba(255,190,110,0.0)');
+        cx.fillStyle = gr; cx.fillRect(0, 0, 128, 128);
+      }
+      const ledTex = new window.THREE.CanvasTexture(ledCanvas);
+      const ledMat = new window.THREE.MeshBasicMaterial({ map: ledTex, transparent: true, blending: window.THREE.AdditiveBlending, depthWrite: false, opacity: 0.5 });
 
       frames.forEach((fr) => {
         const ph = byFrame.get(fr.n) || null;
@@ -291,6 +451,9 @@ export default function Home() {
           new window.THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.45 })
         );
         g.add(frame);
+        const led = new window.THREE.Mesh(new window.THREE.PlaneGeometry(w + MAT_PADDING * sc + 0.9 * sc, h + MAT_PADDING * sc + 0.9 * sc), ledMat);
+        led.position.z = 0.012;
+        g.add(led);
         scene.add(g);
 
         if (!ph) return; 
@@ -312,6 +475,7 @@ export default function Home() {
       // --- لوحة المفاتيح ---
       function onKeyDown(e) {
         if (fullscreenOpen || paused) return;
+        { const tgk = e.target; if (tgk && (tgk.tagName === 'INPUT' || tgk.tagName === 'TEXTAREA')) return; }
         if (e.code === 'KeyW' || e.code === 'ArrowUp') state.keys.w = true;
         if (e.code === 'KeyS' || e.code === 'ArrowDown') state.keys.s = true;
         if (e.code === 'KeyA' || e.code === 'ArrowLeft') state.keys.a = true;
@@ -368,12 +532,12 @@ export default function Home() {
       function onTouchStart(e) {
         if (fullscreenOpen || paused) return;
         const tg = e.target;
-        if (tg && tg.closest && tg.closest('button,a,input,select,textarea,#entryOverlay')) return;
+        if (tg && tg.closest && tg.closest('button,a,input,select,textarea,#entryOverlay,#chatPanel,#chatToggleBtn')) return;
         for (const t of e.changedTouches) {
           // الجويستيك العائم: لمس في أول 30% من يسار الشاشة => يظهر مكان اللمس
           const isNearJoystick = t.clientX < window.innerWidth * 0.3;
           if (isNearJoystick && !state.joy.a) {
-            state.joy.a = true; 
+            state.joy.a = true;
             state.joy.id = t.identifier;
             state.joy.cx = t.clientX;
             state.joy.cy = t.clientY;
@@ -649,11 +813,78 @@ export default function Home() {
     }).catch(() => {});
   }
 
+
+  // ===== الدردشة العامة: استطلاع دوري، الرسائل تختفي بعد ١٥ ساعة =====
+  useEffect(() => {
+    chatOpenRef.current = chatOpen;
+    if (chatOpen) {
+      setChatUnread(0);
+      fetch('/api/admin/me', { cache: 'no-store' }).then((r) => setChatIsAdmin(r.ok)).catch(() => {});
+    }
+  }, [chatOpen]);
+  async function deleteChatMsg(id) {
+    try {
+      const r = await fetch('/api/chat', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+      if (r.ok) setChatMsgs((prev) => prev.filter((m) => m.id !== id));
+    } catch (e) {}
+  }
+  useEffect(() => {
+    if (!chatEnabled) return undefined;
+    let stop = false;
+    async function poll() {
+      if (stop || document.hidden) return;
+      try {
+        const r = await fetch('/api/chat?after=' + chatLastIdRef.current, { cache: 'no-store' });
+        const d = await r.json();
+        const list = (d && d.messages) || [];
+        if (list.length && !stop) {
+          chatLastIdRef.current = list[list.length - 1].id;
+          setChatMsgs((prev) => {
+            const seen = new Set(prev.map((m) => m.id));
+            const add = list.filter((m) => !seen.has(m.id));
+            return add.length ? [...prev, ...add].slice(-200) : prev;
+          });
+          if (!chatOpenRef.current) setChatUnread((u) => u + list.length);
+        }
+      } catch (e) {}
+    }
+    poll();
+    const t = setInterval(poll, chatOpenRef.current ? 4000 : 8000);
+    const t2 = setInterval(() => { if (chatOpenRef.current) poll(); }, 3000);
+    return () => { stop = true; clearInterval(t); clearInterval(t2); };
+  }, [chatEnabled]);
+  useEffect(() => {
+    const el = chatListRef.current;
+    if (el && chatOpen) el.scrollTop = el.scrollHeight;
+  }, [chatMsgs, chatOpen]);
+
+  async function sendChat() {
+    const text = chatText.trim();
+    if (!text || chatSending) return;
+    setChatSending(true); setChatErr('');
+    try {
+      const sess = readSession();
+      const name = (sess && sess.name) || visitorName.trim() || 'زائر';
+      const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, message: text }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) { setChatErr(d.error || 'تعذّر الإرسال'); }
+      else {
+        setChatText('');
+        if (d.message) {
+          chatLastIdRef.current = Math.max(chatLastIdRef.current, d.message.id);
+          setChatMsgs((prev) => (prev.some((m) => m.id === d.message.id) ? prev : [...prev, d.message]));
+        }
+      }
+    } catch (e) { setChatErr('تعذّر الإرسال'); }
+    setChatSending(false);
+  }
+
   function showEntry(show) {
     const entry = document.getElementById('entryOverlay');
     const joyWrap = document.getElementById('joyWrap');
     const lookHint = document.getElementById('lookHintMobile');
     if (entry) entry.style.display = show ? 'flex' : 'none';
+    setChatEnabled(!show); if (show) { setChatOpen(false); }
     if (!show && isMobile) {
       if (lookHint) lookHint.style.display = 'block';
     }
@@ -984,6 +1215,42 @@ export default function Home() {
           <div id="joyKnob" style={{ position: 'absolute', left: '34px', top: '34px', width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(56,189,248,.9)', pointerEvents: 'none' }}></div>
         </div>
       </div>
+
+
+      {chatEnabled && (
+        <>
+          <button id="chatToggleBtn" onClick={() => setChatOpen((v) => !v)} aria-label="الدردشة" style={{ position: 'fixed', top: '16px', left: '16px', zIndex: 320, height: '44px', padding: '0 14px', borderRadius: '22px', border: '1px solid rgba(255,255,255,.25)', background: 'rgba(15,23,42,.62)', color: '#f3efe8', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', backdropFilter: 'blur(6px)' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+            الدردشة
+            {chatUnread > 0 && <span style={{ background: '#e5484d', color: '#fff', borderRadius: '10px', fontSize: '11px', padding: '1px 7px', fontWeight: 700 }}>{chatUnread > 99 ? '99+' : chatUnread}</span>}
+          </button>
+          {chatOpen && (
+            <div id="chatPanel" dir="rtl" style={{ position: 'fixed', top: '70px', left: '16px', zIndex: 320, width: 'min(340px, calc(100vw - 32px))', height: 'min(56vh, 460px)', display: 'flex', flexDirection: 'column', background: 'rgba(15,23,42,.88)', border: '1px solid rgba(255,255,255,.2)', borderRadius: '14px', backdropFilter: 'blur(10px)', color: '#f3efe8', overflow: 'hidden', fontFamily: 'inherit' }}>
+              <div style={{ padding: '10px 14px', fontSize: '13px', borderBottom: '1px solid rgba(255,255,255,.12)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <b>دردشة الزوار</b>
+                <span style={{ fontSize: '11px', opacity: 0.65 }}>تختفي الرسائل بعد 15 ساعة</span>
+              </div>
+              <div ref={chatListRef} style={{ flex: 1, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '8px', WebkitOverflowScrolling: 'touch' }}>
+                {chatMsgs.length === 0 && <div style={{ opacity: 0.55, fontSize: '13px', textAlign: 'center', marginTop: '20px' }}>لا توجد رسائل بعد — كن أول من يكتب 👋</div>}
+                {chatMsgs.map((m) => {
+                  const mine = (readSession() || {}).name === m.name;
+                  return (
+                    <div key={m.id} style={{ alignSelf: mine ? 'flex-start' : 'flex-end', maxWidth: '88%', background: mine ? 'rgba(56,189,248,.22)' : 'rgba(255,255,255,.1)', borderRadius: '10px', padding: '6px 10px' }}>
+                      <div style={{ fontSize: '11px', opacity: 0.7, marginBottom: '2px' }}>{m.name} · {new Date(m.created_at).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}{chatIsAdmin && <button onClick={() => deleteChatMsg(m.id)} style={{ marginInlineStart: '8px', background: 'none', border: 'none', color: '#ff8a8a', cursor: 'pointer', fontSize: '11px', padding: 0 }}>حذف</button>}</div>
+                      <div style={{ fontSize: '14px', lineHeight: 1.5, wordBreak: 'break-word' }}>{m.message}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              {chatErr && <div style={{ color: '#ff8a8a', fontSize: '12px', padding: '0 12px 6px' }}>{chatErr}</div>}
+              <div style={{ display: 'flex', gap: '8px', padding: '10px', borderTop: '1px solid rgba(255,255,255,.12)' }}>
+                <input value={chatText} maxLength={280} placeholder="اكتب رسالتك..." onChange={(e) => setChatText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') sendChat(); }} style={{ flex: 1, minWidth: 0, padding: '10px 12px', borderRadius: '9px', border: '1px solid rgba(255,255,255,.2)', background: 'rgba(0,0,0,.35)', color: '#f3efe8', fontSize: '16px', outline: 'none', fontFamily: 'inherit' }} />
+                <button onClick={sendChat} disabled={chatSending} style={{ padding: '0 14px', borderRadius: '9px', border: 'none', background: 'linear-gradient(135deg,#c9a35b,#9c7a3c)', color: '#1a1408', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>إرسال</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       <div id="lookHintMobile" style={{ position: 'fixed', right: '20px', bottom: '26px', zIndex: 300, display: 'none', color: 'rgba(255, 255, 255, .7)', fontSize: '12px', background: 'rgba(0, 0, 0, .5)', padding: '8px 12px', borderRadius: '8px', pointerEvents: 'none' }}>
         جاهزيةالمعرض 65%
