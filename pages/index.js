@@ -25,8 +25,8 @@ function writeSession(name, prev) {
 function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch (e) {} }
 
 export default function Home() {
-  const [photos, setPhotos] = useState(null);
-  const [layout, setLayout] = useState(null);
+  const [photos, setPhotos] = useState(null);   // null = لم تُحمَّل بعد (مصفوفة فارغة = لا صور بعد، فتظهر كل الإطارات فارغة)
+  const [layout, setLayout] = useState(null);   // تخطيط الإطارات والجدران من /api/layout (null = لم يُحمَّل بعد)
   const [visitorName, setVisitorName] = useState('');
   const [entering, setEntering] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -34,7 +34,7 @@ export default function Home() {
   const [presence, setPresence] = useState({ count: 0, names: [] });
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [autoSession, setAutoSession] = useState(null);
+  const [autoSession, setAutoSession] = useState(null); // جلسة محفوظة صالحة => دخول تلقائي
   const [sessionNotice, setSessionNotice] = useState('');
   const presenceTimerRef = useRef(null);
   const sessionTimerRef = useRef(null);
@@ -118,26 +118,14 @@ export default function Home() {
     let disposed = false;
     let cleanupFn = null;
 
-    const loadNippleAndInit = () => {
-      if (!window.nipplejs) {
-        const scriptNipple = document.createElement('script');
-        scriptNipple.src = 'https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js';
-        scriptNipple.async = true;
-        scriptNipple.onload = () => { if (!disposed) cleanupFn = initGallery(photos, layout); };
-        document.body.appendChild(scriptNipple);
-      } else {
-        if (!disposed) cleanupFn = initGallery(photos, layout);
-      }
-    };
-
     if (!window.THREE) {
       const script = document.createElement('script');
       script.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
       script.async = true;
-      script.onload = () => { loadNippleAndInit(); };
+      script.onload = () => { if (!disposed) cleanupFn = initGallery(photos, layout); };
       document.body.appendChild(script);
     } else {
-      loadNippleAndInit();
+      cleanupFn = initGallery(photos, layout);
     }
 
     return () => {
@@ -148,15 +136,15 @@ export default function Home() {
     function initGallery(activePhotos, layoutData) {
       'use strict';
       const EYE_HEIGHT = 1.5;
-      const SHOW_DIST = 3.5;
-      const OPEN_DIST = 3.5;
+      const SHOW_DIST = 3.5;   // مسافة ظهور لوحة المعلومات الزجاجية
+      const OPEN_DIST = 3.5;   // مسافة السماح بفتح الصورة بالتكبير (مترين)
 
       const frames = layoutData.frames || DEFAULT_FRAMES;
       const customWalls = layoutData.walls;
 
-      const MAT_PADDING = FRAME_STYLE.PAD;
-      const FRAME_DEPTH = FRAME_STYLE.DEPTH;
-      const IMAGE_OFFSET = FRAME_STYLE.IMAGE_OFFSET;
+      const MAT_PADDING = FRAME_STYLE.PAD;       // هامش الإطار حول الصورة
+      const FRAME_DEPTH = FRAME_STYLE.DEPTH;     // سُمك الإطار (نصفه مغروس داخل الجدار)
+      const IMAGE_OFFSET = FRAME_STYLE.IMAGE_OFFSET; // إزاحة الصورة أمام وجه الإطار مباشرة
 
       function createWoodTexture() {
         const canvas = document.createElement('canvas');
@@ -189,7 +177,7 @@ export default function Home() {
       const state = {
         yaw: 0, pitch: 0,
         keys: { w: false, s: false, a: false, d: false },
-        joy: { a: false, dx: 0, dy: 0 },
+        joy: { a: false, id: null, cx: 0, cy: 0, dx: 0, dy: 0 },
         look: { a: false, id: null, lx: 0, ly: 0 },
         mouseLook: false,
         lastMouseX: 0,
@@ -199,7 +187,6 @@ export default function Home() {
       };
 
       let scene, camera, renderer, hitGroups = [], fullscreenOpen = false, panelTarget = null, rafId = null, paused = false;
-      let joystickManager = null;
 
       const host = document.getElementById('canvasHost');
       if (!host) return () => {};
@@ -208,6 +195,7 @@ export default function Home() {
       scene = new window.THREE.Scene();
       scene.background = new window.THREE.Color(0x141210);
       
+      // رفع نطاق الرؤية الأقصى (far) إلى 500 لتفادي اختفاء الجدران أو الأسقف السميكة جداً
       camera = new window.THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
       camera.position.set(0, EYE_HEIGHT, 14);
       camera.rotation.order = 'YXZ';
@@ -237,14 +225,23 @@ export default function Home() {
       wallTex.repeat.set(4, 2);
       const wallMat = new window.THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.8 });
 
+      // مصفوفة لحفظ الجدران وتفعيل نظام منع العبور من خلالها (Collision Detection)
       const wallColliders = [];
 
+      // رسم الجدران: الاعتماد على الجدران المخصصة إن وجدت، وإلا فالافتراضية
       const activeWalls = (customWalls && customWalls.length > 0)
         ? customWalls
         : ROOM_WALLS.map((w, i) => ({
             uid: 'w' + (i + 1),
-            width: w[0], height: w[1], depth: w[2],
-            x: w[3], y: w[4], z: w[5], r: w[6] || 0, rx: 0, rz: 0
+            width: w[0],
+            height: w[1],
+            depth: w[2],
+            x: w[3],
+            y: w[4],
+            z: w[5],
+            r: w[6] || 0,
+            rx: 0,
+            rz: 0
           }));
 
       activeWalls.forEach((w) => {
@@ -264,7 +261,7 @@ export default function Home() {
         m.rotation.x = wRx;
         m.rotation.z = wRz;
         scene.add(m);
-        wallColliders.push(m);
+        wallColliders.push(m); // حفظ الجدار لفحص الاصطدام ومنع العبور
       });
 
       const loader = new window.THREE.TextureLoader();
@@ -364,54 +361,58 @@ export default function Home() {
       window.addEventListener('mousemove', onMouseMove);
       window.addEventListener('mouseup', onMouseUp);
 
-      // --- تهيئة NippleJS للجويستيك ---
-      const joyZone = document.getElementById('joyWrap');
-      if (window.nipplejs && joyZone) {
-        joyZone.innerHTML = '';
-        joystickManager = window.nipplejs.create({
-          zone: joyZone,
-          mode: 'static',
-          position: { left: '60px', bottom: '60px' },
-          color: '#c9a35b',
-          size: 110
-        });
+      // --- تحكم اللمس (الجوالات) ---
+      const joyZone = document.getElementById('joyZone');
+      const joyKnob = document.getElementById('joyKnob');
 
-        joystickManager.on('move', (evt, data) => {
-          if (data && data.vector) {
-            state.joy.a = true;
-            state.joy.dx = data.vector.x;
-            state.joy.dy = data.vector.y;
-          }
-        });
-
-        joystickManager.on('end', () => {
-          state.joy.a = false;
-          state.joy.dx = 0;
-          state.joy.dy = 0;
-        });
-      }
-
-      // --- تحكم اللمس (التدوير والنقر للوحات) ---
       function onTouchStart(e) {
         if (fullscreenOpen || paused) return;
+        const tg = e.target;
+        if (tg && tg.closest && tg.closest('button,a,input,select,textarea,#entryOverlay')) return;
         for (const t of e.changedTouches) {
-          if (t.clientX > 160 || t.clientY < window.innerHeight - 160) {
-            if (!state.look.a) {
-              state.look.a = true;
-              state.look.id = t.identifier;
-              state.look.lx = t.clientX;
-              state.look.ly = t.clientY;
+          // الجويستيك العائم: لمس في أول 30% من يسار الشاشة => يظهر مكان اللمس
+          const isNearJoystick = t.clientX < window.innerWidth * 0.3;
+          if (isNearJoystick && !state.joy.a) {
+            state.joy.a = true;
+            state.joy.id = t.identifier;
+            state.joy.cx = t.clientX;
+            state.joy.cy = t.clientY;
+            state.joy.dx = 0; state.joy.dy = 0; state.joy.mag = 0;
+            const jw = document.getElementById('joyWrap');
+            if (jw) {
+              jw.style.left = (t.clientX - 55) + 'px';
+              jw.style.top = (t.clientY - 55) + 'px';
+              jw.style.bottom = 'auto';
+              jw.style.display = 'block';
             }
+            if (joyKnob) { joyKnob.style.left = '31px'; joyKnob.style.top = '31px'; }
+          } else if (!state.look.a) {
+            state.look.a = true;
+            state.look.id = t.identifier;
+            state.look.lx = t.clientX;
+            state.look.ly = t.clientY;
           }
           state.tap[t.identifier] = { x: t.clientX, y: t.clientY, moved: false };
         }
       }
-
       function onTouchMove(e) {
         for (const t of e.changedTouches) {
           const tp = state.tap[t.identifier];
           if (tp && Math.hypot(t.clientX - tp.x, t.clientY - tp.y) > 8) tp.moved = true;
-          
+          if (state.joy.a && t.identifier === state.joy.id) {
+            let dx = t.clientX - state.joy.cx, dy = t.clientY - state.joy.cy;
+            const R = 55, len = Math.hypot(dx, dy);
+            // داخل الدائرة: بطيء تدريجي — خارجها بالكامل: سريع
+            state.joy.mag = len <= R ? 0.4 * (len / R) : 1;
+            state.joy.dx = len > 0 ? dx / len : 0;
+            state.joy.dy = len > 0 ? dy / len : 0;
+            const kmax = 31;
+            if (len > kmax) { dx = dx / len * kmax; dy = dy / len * kmax; }
+            if (joyKnob) {
+              joyKnob.style.left = (31 + dx) + 'px';
+              joyKnob.style.top = (31 + dy) + 'px';
+            }
+          }
           if (state.look.a && t.identifier === state.look.id) {
             state.yaw -= (t.clientX - state.look.lx) * 0.0035;
             state.pitch -= (t.clientY - state.look.ly) * 0.0035;
@@ -421,7 +422,6 @@ export default function Home() {
           }
         }
       }
-
       function onTouchEnd(e) {
         for (const t of e.changedTouches) {
           const tp = state.tap[t.identifier];
@@ -429,13 +429,18 @@ export default function Home() {
             triggerRaycast(t.clientX, t.clientY);
           }
           delete state.tap[t.identifier];
+          if (state.joy.a && t.identifier === state.joy.id) {
+            state.joy.a = false;
+            state.joy.dx = 0; state.joy.dy = 0; state.joy.mag = 0;
+            const jw2 = document.getElementById('joyWrap');
+            if (jw2) jw2.style.display = 'none';
+          }
           if (state.look.a && t.identifier === state.look.id) state.look.a = false;
         }
       }
-
-      renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: true });
-      renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: true });
-      renderer.domElement.addEventListener('touchend', onTouchEnd);
+      document.addEventListener('touchstart', onTouchStart, { passive: true });
+      document.addEventListener('touchmove', onTouchMove, { passive: true });
+      document.addEventListener('touchend', onTouchEnd);
 
       function showTooFarHint() {
         const el = document.getElementById('tooFarToast');
@@ -504,7 +509,7 @@ export default function Home() {
       function onGalleryPause() {
         paused = true;
         state.keys.w = state.keys.s = state.keys.a = state.keys.d = false;
-        state.joy.a = false; state.joy.dx = 0; state.joy.dy = 0;
+        state.joy.a = false; state.joy.dx = 0; state.joy.dy = 0; state.joy.mag = 0; { const jw3 = document.getElementById('joyWrap'); if (jw3) jw3.style.display = 'none'; }
         state.mouseLook = false;
       }
       function onGalleryResume() { paused = false; }
@@ -522,6 +527,7 @@ export default function Home() {
           const forward = new window.THREE.Vector3(-Math.sin(state.yaw), 0, -Math.cos(state.yaw));
           const right = new window.THREE.Vector3(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
 
+          // 1. حفظ الموقع القديم للزائر قبل التحرك
           const oldPos = camera.position.clone();
 
           let displacement = new window.THREE.Vector3(0, 0, 0);
@@ -532,18 +538,16 @@ export default function Home() {
           if (state.keys.d) { displacement.addScaledVector(right, speed); hasKeyMove = true; }
           if (hasKeyMove) camera.position.add(displacement);
 
-          // تحديث الحركة بناءً على NippleJS
           if (state.joy.a) {
-            const joyMagnitude = Math.hypot(state.joy.dx, state.joy.dy);
-            if (joyMagnitude > 0.05) {
-              const moveDir = forward.clone().multiplyScalar(state.joy.dy).add(right.clone().multiplyScalar(state.joy.dx));
-              moveDir.normalize();
-              camera.position.addScaledVector(moveDir, speed * joyMagnitude);
-            }
+            const joyDir = new window.THREE.Vector3(state.joy.dx, 0, state.joy.dy).applyQuaternion(camera.quaternion);
+            joyDir.y = 0;
+            if (joyDir.lengthSq() > 0) joyDir.normalize();
+            camera.position.addScaledVector(joyDir, 0.05 * (state.joy.mag || 0));
           }
 
+          // 2. نظام منع العبور من خلال الجدران (Collision Detection)
           let collided = false;
-          const playerRadius = 0.35;
+          const playerRadius = 0.35; // مسافة أمان حول الزائر لمنع الالتصاق المباشر
 
           for (const wallMesh of wallColliders) {
             const box = new window.THREE.Box3().setFromObject(wallMesh);
@@ -556,6 +560,7 @@ export default function Home() {
             }
           }
 
+          // إذا حاول الزائر اختراق الجدار، يتم إرجاعه فوراً لموقعه السابق
           if (collided) {
             camera.position.copy(oldPos);
           }
@@ -597,7 +602,6 @@ export default function Home() {
 
       return function cleanup() {
         if (rafId) cancelAnimationFrame(rafId);
-        if (joystickManager) joystickManager.destroy();
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
         window.removeEventListener('mousemove', onMouseMove);
@@ -608,9 +612,9 @@ export default function Home() {
         window.removeEventListener('gallery:resume', onGalleryResume);
         if (renderer) {
           renderer.domElement.removeEventListener('mousedown', onMouseDown);
-          renderer.domElement.removeEventListener('touchstart', onTouchStart);
-          renderer.domElement.removeEventListener('touchmove', onTouchMove);
-          renderer.domElement.removeEventListener('touchend', onTouchEnd);
+          document.removeEventListener('touchstart', onTouchStart);
+          document.removeEventListener('touchmove', onTouchMove);
+          document.removeEventListener('touchend', onTouchEnd);
           renderer.dispose();
         }
         if (fsBackBtn) fsBackBtn.removeEventListener('click', onFsBackClick);
@@ -638,6 +642,7 @@ export default function Home() {
       clearInterval(presenceTimerRef.current);
       presenceTimerRef.current = null;
     }
+    // نُبلغ الخادم بالمغادرة فوراً حتى لا يبقى الزائر "متواجداً" بعد خروجه
     fetch('/api/presence', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -651,7 +656,6 @@ export default function Home() {
     const lookHint = document.getElementById('lookHintMobile');
     if (entry) entry.style.display = show ? 'flex' : 'none';
     if (!show && isMobile) {
-      if (joyWrap) joyWrap.style.display = 'block';
       if (lookHint) lookHint.style.display = 'block';
     }
     if (show) {
@@ -660,6 +664,7 @@ export default function Home() {
     }
   }
 
+  // انتهاء جلسة الـ٣ ساعات: تُزال بيانات الدخول من المتصفح ويعود الزائر للصفحة الرئيسية
   function expireSession() {
     clearSession();
     if (sessionTimerRef.current) { clearTimeout(sessionTimerRef.current); sessionTimerRef.current = null; }
@@ -671,12 +676,14 @@ export default function Home() {
     setSessionNotice('انتهت جلسة دخولك (٣ ساعات). أدخل اسمك للمتابعة.');
   }
 
+  // auto = دخول تلقائي بجلسة محفوظة (لا يُسجَّل كزيارة جديدة)
   async function doEnter(name, auto) {
     setEntering(true);
     setSessionNotice('');
     const prev = readSession();
     const sameSession = prev && prev.name === name ? prev : null;
     if (!sameSession) {
+      // دخول جديد => يُسجَّل في سجل الزوار مرة واحدة طوال مدة الجلسة
       try {
         let model = null;
         try {
@@ -717,10 +724,13 @@ export default function Home() {
     await doEnter(name, false);
   }
 
+  // الدخول التلقائي عند وجود جلسة محفوظة صالحة
   useEffect(() => {
     if (autoSession) doEnter(autoSession.name, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSession]);
 
+  // تسجيل خروج الزائر: يمسح الجلسة المحفوظة ويعيده لصفحة إدخال الاسم
   function handleVisitorLogout() {
     setMenuOpen(false);
     clearSession();
@@ -800,7 +810,7 @@ export default function Home() {
         }
         #tooFarToast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 
-        #entryNameInput { width: 100%; padding: 13px 16px; margin-bottom: 14px; border-radius: 10px; border: 1px solid rgba(201,163,91,.22); background: rgba(0,0,0,.32); color: #f3efe8; font-size: 14px; outline: none; text-align: center; font-family: inherit; transition: border-color .2s ease; }
+        #entryNameInput { width: 100%; box-sizing: border-box; padding: 14px; margin-bottom: 14px; border-radius: 9px; border: 1px solid rgba(201,163,91,.22); background: rgba(0,0,0,.32); color: #f3efe8; font-size: 15.5px; outline: none; text-align: center; font-family: inherit; transition: border-color .2s ease; }
         #entryNameInput:focus { border-color: rgba(201,163,91,.65); }
         #entryNameInput::placeholder { color: #776f62; }
 
@@ -970,8 +980,11 @@ export default function Home() {
         </div>
       </div>
 
-      {/* حاوية nipplejs للجويستيك */}
-      <div id="joyWrap" style={{ position: 'fixed', left: '20px', bottom: '20px', width: '130px', height: '130px', zIndex: 300, display: 'none', touchAction: 'none' }}></div>
+      <div id="joyWrap" style={{ position: 'fixed', left: '22px', bottom: '26px', zIndex: 300, pointerEvents: 'none', display: 'none', opacity: 0.3 }}>
+        <div id="joyZone" style={{ width: '110px', height: '110px', borderRadius: '50%', background: 'rgba(30, 25, 20, .42)', border: '1px solid rgba(255, 255, 255, .32)', position: 'relative', touchAction: 'none', pointerEvents: 'none' }}>
+          <div id="joyKnob" style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(201, 163, 91, .95)', position: 'absolute', top: '31px', left: '31px', pointerEvents: 'none' }}></div>
+        </div>
+      </div>
 
       <div id="lookHintMobile" style={{ position: 'fixed', right: '20px', bottom: '26px', zIndex: 300, display: 'none', color: 'rgba(255, 255, 255, .7)', fontSize: '12px', background: 'rgba(0, 0, 0, .5)', padding: '8px 12px', borderRadius: '8px', pointerEvents: 'none' }}>
         جاهزيةالمعرض 65%
