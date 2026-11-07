@@ -45,7 +45,7 @@ export default function EntryAuth({ visitorName, setVisitorName, onGuestEnter, e
       if (dead || !window.google || !window.google.accounts || !gRef.current) return;
       window.google.accounts.id.initialize({ client_id: GOOGLE_ID, callback: (resp) => post('/api/auth/google', { credential: resp.credential }) });
       gRef.current.innerHTML = '';
-      window.google.accounts.id.renderButton(gRef.current, { theme: 'filled_black', size: 'large', text: tab === 'register' ? 'signup_with' : 'signin_with', shape: 'pill', width: 280, locale: 'ar' });
+      window.google.accounts.id.renderButton(gRef.current, { theme: 'filled_black', size: 'large', text: tab === 'register' ? 'signup_with' : 'signin_with', shape: 'pill', width: 300, locale: 'ar' });
     };
     if (window.google && window.google.accounts) init();
     else if (!document.getElementById('gsi-client')) {
@@ -87,11 +87,21 @@ export default function EntryAuth({ visitorName, setVisitorName, onGuestEnter, e
 
       {tab === 'login' && (
         <form onSubmit={(e) => { e.preventDefault(); doLogin(); }}>
+          <div style={{ marginBottom: '12px' }}>
+            {GOOGLE_ID && <div ref={gRef} style={{ width: '100%', minHeight: '46px', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '4px', boxSizing: 'border-box', border: '1px solid rgba(201,163,91,.22)', borderRadius: '9px', background: 'rgba(0,0,0,.32)' }}></div>}
+            {!GOOGLE_ID && (
+            <button type="button" onClick={() => setErr('الدخول عبر Google غير مفعّل بعد — يحتاج المدير لإضافة NEXT_PUBLIC_GOOGLE_CLIENT_ID في إعدادات الموقع.')} style={{ width: '100%', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', background: '#fff', color: '#3c4043', border: '1px solid #dadce0', borderRadius: '9px', fontSize: '14.5px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: 0.92, boxSizing: 'border-box' }}>
+              <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.9 2.4 30.4 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.6 5.9c4.4-4.1 7-10.1 7-17.6z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.5 0 20.1 0 24s.9 7.5 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.9 2.3-8.3 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+              {tab === 'register' ? 'التسجيل عبر Google' : 'الدخول عبر Google'}
+            </button>
+          )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '14px 0 2px', color: '#776f62', fontSize: '12px' }}><span style={{ flex: 1, height: 1, background: 'rgba(255,255,255,.1)' }} /> أو بالبريد وكلمة المرور <span style={{ flex: 1, height: 1, background: 'rgba(255,255,255,.1)' }} /></div>
+          </div>
           {field('اسم المستخدم أو البريد الإلكتروني', 'identifier', { autoComplete: 'username', dir: 'ltr', style: { textAlign: 'left' } })}
           {field('كلمة المرور', 'password', { type: 'password', autoComplete: 'current-password', dir: 'ltr', style: { textAlign: 'left' } })}
           {err && <div style={{ color: '#ff8a8a', fontSize: '13px', marginBottom: '10px' }}>{err}</div>}
           <button type="submit" disabled={busy} style={goldBtn}>{busy ? '...جاري الدخول' : 'دخول'}</button>
-          {GOOGLE_ID && <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'center' }} ref={gRef}></div>}
+
           <p style={{ color: '#8a8478', fontSize: '12px', marginTop: '12px' }}>الإداريون يدخلون من هنا أيضاً باسم المستخدم أو البريد.</p>
         </form>
       )}
@@ -104,6 +114,16 @@ export default function EntryAuth({ visitorName, setVisitorName, onGuestEnter, e
             <div>✓ حسابك محفوظ: تبقى مسجّلاً دخولك دون إعادة كتابة اسمك</div>
             <div>✓ هوية معروفة بشارة «عضو» بين الزوار</div>
           </div>
+          <div style={{ marginBottom: '12px' }}>
+            {GOOGLE_ID && <div ref={gRef} style={{ width: '100%', minHeight: '46px', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '4px', boxSizing: 'border-box', border: '1px solid rgba(201,163,91,.22)', borderRadius: '9px', background: 'rgba(0,0,0,.32)' }}></div>}
+            {!GOOGLE_ID && (
+            <button type="button" onClick={() => setErr('الدخول عبر Google غير مفعّل بعد — يحتاج المدير لإضافة NEXT_PUBLIC_GOOGLE_CLIENT_ID في إعدادات الموقع.')} style={{ width: '100%', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', background: '#fff', color: '#3c4043', border: '1px solid #dadce0', borderRadius: '9px', fontSize: '14.5px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: 0.92, boxSizing: 'border-box' }}>
+              <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.9 2.4 30.4 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.6 5.9c4.4-4.1 7-10.1 7-17.6z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.5 0 20.1 0 24s.9 7.5 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.9 2.3-8.3 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+              {tab === 'register' ? 'التسجيل عبر Google' : 'الدخول عبر Google'}
+            </button>
+          )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '14px 0 2px', color: '#776f62', fontSize: '12px' }}><span style={{ flex: 1, height: 1, background: 'rgba(255,255,255,.1)' }} /> أو بالبريد وكلمة المرور <span style={{ flex: 1, height: 1, background: 'rgba(255,255,255,.1)' }} /></div>
+          </div>
           {field('الاسم الثلاثي الحقيقي', 'fullName', { placeholder: 'مثال: محمد أحمد العتيبي', autoComplete: 'name', maxLength: 80 })}
           {field('اسم المستخدم (إنجليزي)', 'username', { dir: 'ltr', autoComplete: 'username', maxLength: 24, placeholder: 'username', style: { textAlign: 'left' } })}
           {field('البريد الإلكتروني', 'email', { type: 'email', dir: 'ltr', autoComplete: 'email', placeholder: 'name@example.com', style: { textAlign: 'left' } })}
@@ -111,7 +131,13 @@ export default function EntryAuth({ visitorName, setVisitorName, onGuestEnter, e
           {field('تأكيد كلمة المرور', 'password2', { type: 'password', dir: 'ltr', autoComplete: 'new-password', style: { textAlign: 'left' } })}
           {err && <div style={{ color: '#ff8a8a', fontSize: '13px', marginBottom: '10px' }}>{err}</div>}
           <button type="submit" disabled={busy} style={goldBtn}>{busy ? '...جاري التسجيل' : 'إنشاء الحساب'}</button>
-          {GOOGLE_ID && <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'center' }} ref={gRef}></div>}
+          {!GOOGLE_ID && (
+            <button type="button" onClick={() => setErr('الدخول عبر Google غير مفعّل بعد — يحتاج المدير لإضافة NEXT_PUBLIC_GOOGLE_CLIENT_ID في إعدادات الموقع.')} style={{ width: '100%', marginTop: '12px', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', background: '#fff', color: '#3c4043', border: '1px solid #dadce0', borderRadius: '9px', fontSize: '14.5px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: 0.85 }}>
+              <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.9 2.4 30.4 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.6 5.9c4.4-4.1 7-10.1 7-17.6z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.5 0 20.1 0 24s.9 7.5 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.9 2.3-8.3 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+              {tab === 'register' ? 'التسجيل عبر Google' : 'الدخول عبر Google'}
+            </button>
+          )}
+
         </form>
       )}
     </div>
