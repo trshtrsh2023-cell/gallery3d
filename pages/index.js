@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import Head from 'next/head';
+import { createObjectMesh, normalizeObjects, buildDefaultObjects, objectBox } from '../lib/galleryObjects';
 import { DEFAULT_FRAMES, FRAME_STYLE, ROOM_WALLS, normalizeFrames, normalizeWalls, assignPhotosToFrames, prepareDisplayTexture, fitImage, makeEmptyFrameTexture } from '../lib/galleryLayout';
 
 const PRESENCE_HEARTBEAT_MS = 20000;
@@ -86,7 +87,8 @@ export default function Home() {
         const walls = normalizeWalls(d && d.walls);
         setLayout({
           frames: frames.length ? frames : DEFAULT_FRAMES,
-          walls: walls && walls.length ? walls : null
+          walls: walls && walls.length ? walls : null,
+          objects: normalizeObjects(d && d.objects)
         });
       })
       .catch(() => setLayout({ frames: DEFAULT_FRAMES, walls: null }));
@@ -282,11 +284,16 @@ export default function Home() {
       {
         let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, ceilY = 0;
         activeWalls.forEach((w) => {
-          const ext = Math.max(w.width || 0, w.depth || 0) / 2;
-          minX = Math.min(minX, (w.x || 0) - ext); maxX = Math.max(maxX, (w.x || 0) + ext);
-          minZ = Math.min(minZ, (w.z || 0) - ext); maxZ = Math.max(maxZ, (w.z || 0) + ext);
+          const c = Math.abs(Math.cos(w.r || 0)), sn = Math.abs(Math.sin(w.r || 0));
+          const hx = c * (w.width || 0) / 2 + sn * (w.depth || 0) / 2;
+          const hz = sn * (w.width || 0) / 2 + c * (w.depth || 0) / 2;
+          minX = Math.min(minX, (w.x || 0) - hx); maxX = Math.max(maxX, (w.x || 0) + hx);
+          minZ = Math.min(minZ, (w.z || 0) - hz); maxZ = Math.max(maxZ, (w.z || 0) + hz);
           ceilY = Math.max(ceilY, (w.y || 0) + (w.height || 0) / 2);
         });
+        // يشمل السقف مواضع اللوحات ونقطة دخول الزائر
+        frames.forEach((f) => { minX = Math.min(minX, f.x - 1); maxX = Math.max(maxX, f.x + 1); minZ = Math.min(minZ, f.z - 1); maxZ = Math.max(maxZ, f.z + 1); });
+        minX = Math.min(minX, -1); maxX = Math.max(maxX, 1); maxZ = Math.max(maxZ, 15.5);
         if (!isFinite(minX)) { minX = -15; maxX = 15; minZ = -15; maxZ = 15; ceilY = 6; }
         // سقف يظهر من الداخل فقط (لا يحجب التصوير من الأعلى)
         const ceil = new THREE_.Mesh(
@@ -297,115 +304,44 @@ export default function Home() {
         ceil.position.set((minX + maxX) / 2, ceilY, (minZ + maxZ) / 2);
         scene.add(ceil);
 
-        // لمبات سقف غائرة بشبكة منتظمة
+        // إضاءات سقف قليلة موزعة بالتساوي (شبكة منتظمة على كامل مساحة المعرض)
         const lampMat = new THREE_.MeshBasicMaterial({ color: 0xfff0cf });
         const ringMat = new THREE_.MeshStandardMaterial({ color: 0x2a2724, roughness: 0.6 });
-        const lampGeo = new THREE_.CylinderGeometry(0.2, 0.2, 0.03, 20);
-        const ringGeo = new THREE_.CylinderGeometry(0.27, 0.27, 0.05, 20);
-        const spots = [];
-        const step = 4.5;
-        for (let x = minX + 2.5; x <= maxX - 2; x += step) {
-          for (let z = minZ + 2.5; z <= maxZ - 2; z += step) {
-            if (spots.length >= 48) break;
-            spots.push([x, z]);
+        const lampGeo = new THREE_.CylinderGeometry(0.28, 0.28, 0.03, 24);
+        const ringGeo = new THREE_.CylinderGeometry(0.38, 0.38, 0.05, 24);
+        const areaW = maxX - minX, areaD = maxZ - minZ;
+        const maxLights = (window.innerWidth < 800 || (navigator.maxTouchPoints || 0) > 0) ? 6 : 9;
+        let nx = Math.max(1, Math.round(Math.sqrt(maxLights * areaW / Math.max(1, areaD))));
+        let nz = Math.max(1, Math.floor(maxLights / nx));
+        while (nx * nz > maxLights && nx > 1) nx--;
+        for (let i = 0; i < nx; i++) {
+          for (let j = 0; j < nz; j++) {
+            const lx = minX + areaW * (i + 0.5) / nx;
+            const lz = minZ + areaD * (j + 0.5) / nz;
             const ring = new THREE_.Mesh(ringGeo, ringMat);
-            ring.position.set(x, ceilY - 0.02, z);
+            ring.position.set(lx, ceilY - 0.02, lz);
             scene.add(ring);
             const lamp = new THREE_.Mesh(lampGeo, lampMat);
-            lamp.position.set(x, ceilY - 0.045, z);
+            lamp.position.set(lx, ceilY - 0.045, lz);
             scene.add(lamp);
+            const pl = new THREE_.PointLight(0xfff0d8, 0.34, Math.max(14, Math.max(areaW / nx, areaD / nz) * 1.6), 1.3);
+            pl.position.set(lx, ceilY - 0.6, lz);
+            scene.add(pl);
           }
         }
-        // عدد محدود من الإضاءة الفعلية للحفاظ على الأداء على الجوال
-        const nLights = Math.min(5, spots.length);
-        for (let i = 0; i < nLights; i++) {
-          const sp = spots[Math.floor((i + 0.5) * spots.length / nLights)];
-          const pl = new THREE_.PointLight(0xfff0d8, 0.32, 20, 1.4);
-          pl.position.set(sp[0], ceilY - 0.6, sp[1]);
-          scene.add(pl);
-        }
 
-        // مجسمات: مزهريات ونباتات عند أطراف الجدران
-        const vaseMat = new THREE_.MeshStandardMaterial({ color: 0x2f5d62, roughness: 0.35, metalness: 0.15 });
-        const vase2Mat = new THREE_.MeshStandardMaterial({ color: 0xc8b79a, roughness: 0.5 });
-        const potMat = new THREE_.MeshStandardMaterial({ color: 0x3b2f27, roughness: 0.8 });
-        const leafMats = [0x3f7d3a, 0x57963f, 0x2f6a35].map((c) => new THREE_.MeshStandardMaterial({ color: c, roughness: 0.8 }));
-        const vaseGeo = new THREE_.LatheGeometry([
-          [0.00, 0.00], [0.16, 0.00], [0.24, 0.12], [0.27, 0.32], [0.20, 0.55], [0.11, 0.72], [0.13, 0.82], [0.17, 0.88]
-        ].map((q) => new THREE_.Vector2(q[0], q[1])), 18);
-        const potGeo = new THREE_.CylinderGeometry(0.3, 0.22, 0.45, 16);
-        const bladeGeo = new THREE_.ConeGeometry(0.045, 0.9, 4);
-        const fernGeo = new THREE_.ConeGeometry(0.1, 0.7, 5);
-
-        function makeVase(mat, flowers) {
-          const g = new THREE_.Group();
-          g.add(new THREE_.Mesh(vaseGeo, mat));
-          if (flowers) {
-            for (let i = 0; i < 7; i++) {
-              const a = (i / 7) * Math.PI * 2;
-              const stem = new THREE_.Mesh(new THREE_.CylinderGeometry(0.012, 0.012, 0.7, 5), leafMats[2]);
-              stem.position.set(Math.cos(a) * 0.07, 1.15, Math.sin(a) * 0.07);
-              stem.rotation.set(Math.sin(a) * 0.35, 0, -Math.cos(a) * 0.35);
-              g.add(stem);
-              const bloom = new THREE_.Mesh(new THREE_.SphereGeometry(0.06, 8, 6), new THREE_.MeshStandardMaterial({ color: [0xd94f6a, 0xf0b13c, 0xf4efe6][i % 3], roughness: 0.6 }));
-              bloom.position.set(Math.cos(a) * 0.22, 1.47, Math.sin(a) * 0.22);
-              g.add(bloom);
-            }
-          }
-          return g;
-        }
-        function makePlant() {
-          const g = new THREE_.Group();
-          const pot = new THREE_.Mesh(potGeo, potMat); pot.position.y = 0.225; g.add(pot);
-          const soil = new THREE_.Mesh(new THREE_.CylinderGeometry(0.28, 0.28, 0.02, 14), new THREE_.MeshStandardMaterial({ color: 0x1d1612 }));
-          soil.position.y = 0.45; g.add(soil);
-          for (let i = 0; i < 16; i++) {
-            const a = (i / 16) * Math.PI * 2 + (i % 2) * 0.2;
-            const rad = 0.04 + (i % 4) * 0.045;
-            const blade = new THREE_.Mesh(i % 3 === 0 ? fernGeo : bladeGeo, leafMats[i % 3]);
-            const hh = (i % 3 === 0 ? 0.7 : 0.9) * (0.8 + (i % 5) * 0.12);
-            blade.scale.y = hh / (i % 3 === 0 ? 0.7 : 0.9);
-            blade.position.set(Math.cos(a) * rad, 0.45 + hh / 2, Math.sin(a) * rad);
-            blade.rotation.set(Math.sin(a) * 0.32, 0, -Math.cos(a) * 0.32);
-            g.add(blade);
-          }
-          return g;
-        }
-
-        // تحويل نقطة لإحداثيات جدار محلية للتأكد من أن المكان خالٍ
-        const insideAnyWall = (px, pz, margin, self) => activeWalls.some((w) => {
-          if (w === self) return false;
-          const c = Math.cos(w.r || 0), sn = Math.sin(w.r || 0);
-          const dx = px - (w.x || 0), dz = pz - (w.z || 0);
-          const lx = dx * c - dz * sn, lz = dx * sn + dz * c;
-          return Math.abs(lx) <= (w.width || 0) / 2 + margin && Math.abs(lz) <= (w.depth || 0) / 2 + margin;
-        });
-        let propCount = 0, kind = 0;
-        activeWalls.forEach((w) => {
-          if (propCount >= 18) return;
-          const wr = w.r || 0, c = Math.cos(wr), sn = Math.sin(wr);
-          const alongX = (w.width || 0) >= (w.depth || 0);
-          const L = alongX ? w.width : w.depth;
-          const T = alongX ? w.depth : w.width;
-          if (L < 2.5) return;
-          const offs = L > 14 ? [-L / 2 + 1.0, 0, L / 2 - 1.0] : L > 6 ? [-L / 2 + 1.0, L / 2 - 1.0] : [0];
-          offs.forEach((o) => {
-            if (propCount >= 18) return;
-            for (const side of [1, -1]) {
-              const lx = alongX ? o : side * (T / 2 + 0.55);
-              const lz = alongX ? side * (T / 2 + 0.55) : o;
-              // من المحلي إلى العالمي (دوران Y)
-              const px = (w.x || 0) + lx * c + lz * sn;
-              const pz = (w.z || 0) - lx * sn + lz * c;
-              if (insideAnyWall(px, pz, 0.6, w)) continue;
-              const obj = kind % 3 === 0 ? makePlant() : kind % 3 === 1 ? makeVase(vaseMat, true) : makeVase(vase2Mat, false);
-              obj.position.set(px, 0, pz);
-              obj.rotation.y = (propCount * 1.7) % 6.28;
-              scene.add(obj);
-              kind++; propCount++;
-              break;
-            }
-          });
+        // مجسمات قابلة للتحريك من محرر الصالة (مزهريات/نباتات/نصوص) — وغير قابلة للعبور
+        const objList = (layoutData.objects && Array.isArray(layoutData.objects)) ? layoutData.objects : buildDefaultObjects(activeWalls);
+        objList.forEach((o) => {
+          const g = createObjectMesh(THREE_, o);
+          scene.add(g);
+          const bx = objectBox(o);
+          const col = new THREE_.Mesh(new THREE_.BoxGeometry(bx.w, bx.h, bx.d), new THREE_.MeshBasicMaterial());
+          col.visible = false;
+          col.position.set(o.x, o.y + bx.h / 2, o.z);
+          col.rotation.y = o.r || 0;
+          scene.add(col);
+          wallColliders.push(col);
         });
       }
 
@@ -686,7 +622,7 @@ export default function Home() {
         camera.rotation.x = state.pitch;
 
         if (!fullscreenOpen && !paused) {
-          const speed = 0.50;
+          const speed = 0.11;
           const forward = new window.THREE.Vector3(-Math.sin(state.yaw), 0, -Math.cos(state.yaw));
           const right = new window.THREE.Vector3(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
 

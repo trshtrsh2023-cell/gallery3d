@@ -5,9 +5,12 @@ import {
   DEFAULT_FRAMES, FRAME_STYLE, FRAME_LIMITS, ROOM_WALLS,
   normalizeFrames, assignPhotosToFrames, prepareDisplayTexture, fitImage, makeEmptyFrameTexture
 } from '../../lib/galleryLayout';
+import { OBJECT_KINDS, MAX_OBJECTS, normalizeObjects, buildDefaultObjects, createObjectMesh, applyObjectTransform, objectBox } from '../../lib/galleryObjects';
 
 let uidCounter = 1;
 const newUid = (prefix = 'f') => prefix + (uidCounter++);
+const newObjUid = () => 'o' + Date.now().toString(36) + (uidCounter++);
+const KC = { frame: 'f', wall: 'w', obj: 'o' };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const RAD2DEG = 180 / Math.PI;
@@ -58,7 +61,7 @@ function createEngine(THREE, host, cb) {
     return { uid, group, mesh, outline };
   }
 
-  function syncWalls(list, selectedWallUid) {
+  function syncWalls(list, keys) {
     const alive = new Set();
     list.forEach((w) => {
       alive.add(w.uid);
@@ -68,7 +71,7 @@ function createEngine(THREE, host, cb) {
       nd.group.rotation.y = w.r || 0;
       nd.mesh.scale.set(w.width, w.height, w.depth);
       nd.outline.scale.set(w.width, w.height, w.depth);
-      nd.outline.visible = (w.uid === selectedWallUid);
+      nd.outline.visible = keys.has('w:' + w.uid);
     });
     wallNodes.forEach((nd, uid) => {
       if (alive.has(uid)) return;
@@ -153,7 +156,7 @@ function createEngine(THREE, host, cb) {
     nd.label.position.set(0, (h + D.PAD * nd.s) / 2 + 0.22, 0.12);
   }
 
-  function sync(list, selectedUid) {
+  function sync(list, keys) {
     const alive = new Set();
     list.forEach((f) => {
       alive.add(f.uid);
@@ -193,7 +196,7 @@ function createEngine(THREE, host, cb) {
         nd.labelN = f.n;
       }
       layoutNode(nd);
-      const on = f.uid === selectedUid;
+      const on = keys.has('f:' + f.uid);
       nd.outline.visible = on;
       nd.arrow.visible = on;
     });
@@ -223,6 +226,53 @@ function createEngine(THREE, host, cb) {
     const out = [];
     wallNodes.forEach((nd) => out.push(nd.mesh));
     return out;
+  }
+
+  // ----- المجسمات: مزهريات / نباتات / نصوص -----
+  const objNodes = new Map();
+  const outlineGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1));
+  function syncObjects(list, keys) {
+    const alive = new Set();
+    list.forEach((o) => {
+      alive.add(o.uid);
+      const sig = o.kind + '|' + (o.kind === 'text' ? o.text + '|' + o.color : '');
+      let nd = objNodes.get(o.uid);
+      if (nd && nd.sig !== sig) { scene.remove(nd.group); scene.remove(nd.outline); objNodes.delete(o.uid); nd = null; }
+      if (!nd) {
+        const group = createObjectMesh(THREE, o);
+        const outline = new THREE.LineSegments(outlineGeo, new THREE.LineBasicMaterial({ color: 0xffc94d }));
+        scene.add(group, outline);
+        nd = { group, outline, sig };
+        objNodes.set(o.uid, nd);
+      }
+      applyObjectTransform(nd.group, o);
+      let bx = objectBox(o);
+      if (o.kind === 'text') {
+        const ts = nd.group.children[0] && nd.group.children[0].userData.textSize;
+        if (ts) bx = { w: ts.w * o.s, h: ts.h * o.s, d: 0.3 * o.s };
+      }
+      nd.outline.scale.set(bx.w + 0.1, bx.h + 0.1, bx.d + 0.1);
+      nd.outline.position.set(o.x, o.kind === 'text' ? o.y : o.y + bx.h / 2, o.z);
+      nd.outline.rotation.y = o.r || 0;
+      nd.outline.visible = keys.has('o:' + o.uid);
+    });
+    objNodes.forEach((nd, uid) => {
+      if (alive.has(uid)) return;
+      scene.remove(nd.group); scene.remove(nd.outline);
+      objNodes.delete(uid);
+    });
+  }
+  function objPickables() {
+    const out = [];
+    objNodes.forEach((nd) => nd.group.traverse((m) => { if (m.isMesh) out.push(m); }));
+    return out;
+  }
+  function pickHit(h) {
+    if (!h) return null;
+    if (h.object.userData.uid) return { type: 'frame', uid: h.object.userData.uid };
+    if (h.object.userData.objUid) return { type: 'obj', uid: h.object.userData.objUid };
+    if (h.object.userData.wallUid) return { type: 'wall', uid: h.object.userData.wallUid };
+    return null;
   }
 
   function placementFromHit(h) {
@@ -257,19 +307,14 @@ function createEngine(THREE, host, cb) {
       return;
     }
     if (e.button === 0) {
-      const fMeshes = framePickables();
-      const wMeshes = wallMeshList();
-      const hits = castFromEvent(e).intersectObjects([...fMeshes, ...wMeshes], false);
-      const h = hits[0];
-      if (h && h.object.userData.uid) {
-        cb.selectFrame(h.object.userData.uid);
-        dragging = { type: 'frame', uid: h.object.userData.uid, started: false, sx: e.clientX, sy: e.clientY };
-      } else if (h && h.object.userData.wallUid) {
-        cb.selectWall(h.object.userData.wallUid);
-        dragging = { type: 'wall', uid: h.object.userData.wallUid, started: false, sx: e.clientX, sy: e.clientY };
+      const hits = castFromEvent(e).intersectObjects([...framePickables(), ...wallMeshList(), ...objPickables()], false);
+      const hit = pickHit(hits[0]);
+      if (hit && (e.ctrlKey || e.metaKey || e.shiftKey)) { cb.toggleMulti(hit); return; }
+      if (hit) {
+        cb.pick(hit.type, hit.uid);
+        dragging = { type: hit.type, uid: hit.uid, started: false, sx: e.clientX, sy: e.clientY };
       } else {
-        cb.selectFrame(null);
-        cb.selectWall(null);
+        cb.clear();
       }
     }
   }
@@ -286,6 +331,12 @@ function createEngine(THREE, host, cb) {
         if (Math.hypot(e.clientX - dragging.sx, e.clientY - dragging.sy) < 5) return;
         dragging.started = true;
         cb.beginGesture();
+        if (dragging.type === 'wall' || dragging.type === 'obj') {
+          const nd0 = dragging.type === 'wall' ? wallNodes.get(dragging.uid) : objNodes.get(dragging.uid);
+          const p0 = new THREE.Vector3();
+          const ok0 = castFromEvent(e).ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), p0);
+          dragging.off = (ok0 && nd0) ? { x: nd0.group.position.x - p0.x, z: nd0.group.position.z - p0.z } : { x: 0, z: 0 };
+        }
       }
       if (dragging.type === 'frame') {
         const p = wallPlacement(castFromEvent(e));
@@ -297,19 +348,19 @@ function createEngine(THREE, host, cb) {
           if (p.axis === 'x') z = Math.round(z / step) * step; else x = Math.round(x / step) * step;
         }
         cb.moveFrame(dragging.uid, { x: r3(x), y: r3(clamp(y, FRAME_LIMITS.Y_MIN, FRAME_LIMITS.Y_MAX)), z: r3(z), r: r3(p.r) });
-      } else if (dragging.type === 'wall') {
-        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-        const targetPos = new THREE.Vector3();
-        castFromEvent(e).ray.intersectPlane(plane, targetPos);
-        if (targetPos) {
+      } else if (dragging.type === 'wall' || dragging.type === 'obj') {
+        const tp = new THREE.Vector3();
+        const okp = castFromEvent(e).ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), tp);
+        if (okp && dragging.off) {
           const step = cb.snapStep();
-          let nx = targetPos.x;
-          let nz = targetPos.z;
+          let nx = tp.x + dragging.off.x;
+          let nz = tp.z + dragging.off.z;
           if (step) {
             nx = Math.round(nx / step) * step;
             nz = Math.round(nz / step) * step;
           }
-          cb.moveWall(dragging.uid, { x: r3(nx), z: r3(nz) });
+          if (dragging.type === 'wall') cb.moveWall(dragging.uid, { x: r3(nx), z: r3(nz) });
+          else cb.moveObj(dragging.uid, { x: r3(nx), z: r3(nz) });
         }
       }
     }
@@ -356,12 +407,8 @@ function createEngine(THREE, host, cb) {
   }
 
   function hitAt(cx, cy) {
-    const hits = castFromEvent({ clientX: cx, clientY: cy }).intersectObjects([...framePickables(), ...wallMeshList()], false);
-    const h = hits[0];
-    if (!h) return null;
-    if (h.object.userData.uid) return { type: 'frame', uid: h.object.userData.uid };
-    if (h.object.userData.wallUid) return { type: 'wall', uid: h.object.userData.wallUid };
-    return null;
+    const hits = castFromEvent({ clientX: cx, clientY: cy }).intersectObjects([...framePickables(), ...wallMeshList(), ...objPickables()], false);
+    return pickHit(hits[0]);
   }
 
   function onTouchStartScene(e) {
@@ -369,11 +416,13 @@ function createEngine(THREE, host, cb) {
     const t = e.changedTouches[0];
     e.preventDefault();
     const hit = hitAt(t.clientX, t.clientY);
-    const sel = cb.getSelected ? cb.getSelected() : null;
-    const alreadySelected = !!(hit && sel && sel.type === hit.type && sel.uid === hit.uid);
+    const alreadySelected = !!(hit && cb.isSelected(hit.type, hit.uid));
     tl = { id: t.identifier, sx: t.clientX, sy: t.clientY, lx: t.clientX, ly: t.clientY, moved: false, hit, mode: alreadySelected ? 'drag' : 'look' };
-    if (hit && !alreadySelected) {
-      if (hit.type === 'frame') cb.selectFrame(hit.uid); else cb.selectWall(hit.uid);
+    if (hit && cb.multiMode()) {
+      cb.toggleMulti(hit);
+      tl.mode = 'none';
+    } else if (hit && !alreadySelected) {
+      cb.pick(hit.type, hit.uid);
     }
     if (tl.mode === 'drag') dragging = { type: hit.type, uid: hit.uid, started: false, sx: t.clientX, sy: t.clientY };
   }
@@ -386,7 +435,7 @@ function createEngine(THREE, host, cb) {
       if (!tl.moved) return;
       if (tl.mode === 'drag') {
         onMove({ clientX: t.clientX, clientY: t.clientY });
-      } else {
+      } else if (tl.mode === 'look') {
         yaw -= (t.clientX - tl.lx) * 0.005;
         pitch -= (t.clientY - tl.ly) * 0.005;
         pitch = clamp(pitch, -1.5, 1.5);
@@ -399,7 +448,7 @@ function createEngine(THREE, host, cb) {
     for (const t of e.changedTouches) {
       if (t.identifier !== tl.id) continue;
       // لمسة قصيرة على فراغ = إلغاء التحديد
-      if (!tl.moved && !tl.hit) { cb.selectFrame(null); cb.selectWall(null); }
+      if (!tl.moved && !tl.hit && !cb.multiMode()) cb.clear();
       dragging = null;
       tl = null;
     }
@@ -505,6 +554,16 @@ function createEngine(THREE, host, cb) {
   return {
     sync,
     syncWalls,
+    syncObjects,
+    focusObject(o) {
+      camera.position.set(o.x + Math.sin(o.r || 0) * 4, Math.max(1.2, o.y + 0.5), o.z + Math.cos(o.r || 0) * 4);
+      yaw = o.r || 0;
+      pitch = 0;
+    },
+    frontGround() {
+      const d = 3.5;
+      return { x: r3(camera.position.x - Math.sin(yaw) * d), z: r3(camera.position.z - Math.cos(yaw) * d), r: r3(yaw) };
+    },
     setSpeed(v) { speed = v; },
     focusFrame(f) {
       const d = 3.4 * Math.max(1, f.s);
@@ -605,24 +664,30 @@ function NumField({ label, value, onChange, step = 0.05, digits = 2, suffix }) {
 }
 
 
-// اللوحات المرتبطة بجدار: القريبة من وجهَيه (ضمن حدوده). عند نقل/تدوير الجدار تُنقل وتُدار معه.
-function carryFramesWithWall(frames, oldW, newW) {
+// العناصر المرتبطة بجدار (لوحات/مجسمات): القريبة من وجهَيه ضمن حدوده.
+// عند نقل/تدوير الجدار تُنقل وتُدار معه (إذا كان خيار «تحريك الجدار مع محتوياته» مفعّلاً).
+function isNearWall(item, w, margin) {
+  const co = Math.cos(w.r || 0), so = Math.sin(w.r || 0);
+  const px = item.x - w.x, pz = item.z - w.z;
+  const lx = px * co - pz * so;
+  const lz = px * so + pz * co;
+  return Math.abs(lx) <= w.width / 2 + margin && Math.abs(lz) <= w.depth / 2 + margin && Math.abs(item.y - w.y) <= w.height / 2 + 0.5;
+}
+function carryWithWall(items, oldW, newW, margin, shiftY) {
   const dr = (newW.r || 0) - (oldW.r || 0);
-  if (!dr && newW.x === oldW.x && newW.y === oldW.y && newW.z === oldW.z) return frames;
+  if (!dr && newW.x === oldW.x && newW.y === oldW.y && newW.z === oldW.z) return items;
   const co = Math.cos(oldW.r || 0), so = Math.sin(oldW.r || 0);
   const cn = Math.cos(newW.r || 0), sn = Math.sin(newW.r || 0);
-  return frames.map((f) => {
+  return items.map((f) => {
+    if (!isNearWall(f, oldW, margin)) return f;
     const px = f.x - oldW.x, pz = f.z - oldW.z;
-    // إحداثيات محلية بالنسبة للجدار القديم (عكس الدوران)
     const lx = px * co - pz * so;
     const lz = px * so + pz * co;
-    const near = Math.abs(lx) <= oldW.width / 2 + 0.5 && Math.abs(lz) <= oldW.depth / 2 + 0.5 && Math.abs(f.y - oldW.y) <= oldW.height / 2 + 0.5;
-    if (!near) return f;
     return {
       ...f,
       x: r3(newW.x + lx * cn + lz * sn),
       z: r3(newW.z - lx * sn + lz * cn),
-      y: r3(f.y + (newW.y - oldW.y)),
+      y: shiftY(f) ? r3(f.y + (newW.y - oldW.y)) : f.y,
       r: r3((f.r || 0) + dr)
     };
   });
@@ -650,16 +715,25 @@ export default function GalleryEditor() {
   const [help, setHelp] = useState(true);
   const [nDraft, setNDraft] = useState('');
   const [isDefault, setIsDefault] = useState(false);
+  const [objects, setObjects] = useState([]);
+  const [selObj, setSelObj] = useState(null);
+  const [extra, setExtra] = useState([]);          // عناصر إضافية محددة (تحديد متعدد) بصيغة 'f:uid' / 'w:uid' / 'o:uid'
+  const [carry, setCarry] = useState(true);        // تحريك الجدار مع لوحاته ومجسماته
+  const [multiMode, setMultiMode] = useState(false);
 
   const undoRef = useRef([]);
   const redoRef = useRef([]);
   const lastUndo = useRef({ key: null, t: 0 });
   const live = useRef({});
-  live.current = { frames, walls, photoOf, sel, selWall, snap, photos };
+  const primaryKey = sel ? 'f:' + sel : selWall ? 'w:' + selWall : selObj ? 'o:' + selObj : null;
+  const selKeys = new Set([...(primaryKey ? [primaryKey] : []), ...extra]);
+  const selKeysStr = [...selKeys].sort().join(',');
+  live.current = { frames, walls, objects, photoOf, sel, selWall, selObj, snap, photos, selKeys, carry, multiMode, primaryKey };
   const cbRef = useRef({});
 
   const selFrame = frames.find((f) => f.uid === sel) || null;
   const selWallObj = walls.find((w) => w.uid === selWall) || null;
+  const selObjObj = objects.find((o) => o.uid === selObj) || null;
   const photoById = {};
   photos.forEach((p) => { photoById[String(p.id)] = p; });
   const placedIds = new Set(Object.values(photoOf));
@@ -701,6 +775,7 @@ export default function GalleryEditor() {
 
       setFrames(listFrames);
       setWalls(listWalls);
+      setObjects(normalizeObjects(lay && lay.objects) || buildDefaultObjects(listWalls));
       setPhotos(phArr);
       setPhotoOf(po);
       setIsDefault(!!(lay && lay.isDefault));
@@ -721,14 +796,18 @@ export default function GalleryEditor() {
   useEffect(() => {
     if (!threeReady || loading || !hostRef.current) return undefined;
     const eng = createEngine(window.THREE, hostRef.current, {
-      selectFrame: (uid) => { setSel(uid); if (uid) setSelWall(null); },
-      selectWall: (uid) => { setSelWall(uid); if (uid) setSel(null); },
+      pick: (t, u) => cbRef.current.pick(t, u),
+      toggleMulti: (h) => cbRef.current.toggleMulti(h),
+      clear: () => cbRef.current.clear(),
+      isSelected: (t, u) => live.current.selKeys.has(KC[t] + ':' + u),
+      multiMode: () => !!live.current.multiMode,
       beginGesture: () => cbRef.current.beginGesture(),
       moveFrame: (uid, p) => cbRef.current.moveFrame(uid, p),
       moveWall: (uid, p) => cbRef.current.moveWall(uid, p),
+      moveObj: (uid, p) => cbRef.current.moveObj(uid, p),
       speed: (v) => setSpeed(Math.round(v * 10) / 10),
       snapStep: () => (live.current.snap ? 0.25 : 0),
-      getSelected: () => (live.current.sel ? { type: 'frame', uid: live.current.sel } : live.current.selWall ? { type: 'wall', uid: live.current.selWall } : null)
+      getSelected: () => null
     });
     engineRef.current = eng;
     setEngineReady(true);
@@ -739,10 +818,11 @@ export default function GalleryEditor() {
     if (!engineReady || !engineRef.current) return;
     engineRef.current.sync(
       frames.map((f) => ({ ...f, photoUrl: photoOf[f.uid] && photoById[photoOf[f.uid]] ? photoById[photoOf[f.uid]].image_url : null })),
-      sel
+      live.current.selKeys
     );
-    engineRef.current.syncWalls(walls, selWall);
-  }, [engineReady, frames, walls, photoOf, photos, sel, selWall]);
+    engineRef.current.syncWalls(walls, live.current.selKeys);
+    engineRef.current.syncObjects(objects, live.current.selKeys);
+  }, [engineReady, frames, walls, objects, photoOf, photos, selKeysStr]);
 
   useEffect(() => { setNDraft(selFrame ? String(selFrame.n) : ''); }, [sel, selFrame]);
 
@@ -753,7 +833,7 @@ export default function GalleryEditor() {
   }, []);
   live.current.dirty = dirty;
 
-  const snapshot = () => JSON.stringify({ frames: live.current.frames, walls: live.current.walls, photoOf: live.current.photoOf });
+  const snapshot = () => JSON.stringify({ frames: live.current.frames, walls: live.current.walls, objects: live.current.objects, photoOf: live.current.photoOf });
   const pushUndo = useCallback((key) => {
     const now = Date.now();
     if (key && lastUndo.current.key === key && now - lastUndo.current.t < 900) { lastUndo.current.t = now; return; }
@@ -766,10 +846,13 @@ export default function GalleryEditor() {
     const o = JSON.parse(str);
     setFrames(o.frames);
     setWalls(o.walls || []);
+    setObjects(o.objects || []);
     setPhotoOf(o.photoOf);
     setDirty(true);
     if (live.current.sel && !o.frames.some((f) => f.uid === live.current.sel)) setSel(null);
     if (live.current.selWall && !(o.walls || []).some((w) => w.uid === live.current.selWall)) setSelWall(null);
+    if (live.current.selObj && !(o.objects || []).some((x) => x.uid === live.current.selObj)) setSelObj(null);
+    setExtra([]);
   };
   const undo = () => {
     const s = undoRef.current.pop();
@@ -792,13 +875,128 @@ export default function GalleryEditor() {
   };
 
   const applyWallPatch = (uid, patch) => {
-    const oldW = live.current.walls.find((w) => w.uid === uid);
+    const L = live.current;
+    const oldW = L.walls.find((w) => w.uid === uid);
     if (!oldW) return;
     const newW = { ...oldW, ...patch };
-    const nf = carryFramesWithWall(live.current.frames, oldW, newW);
-    if (nf !== live.current.frames) { live.current.frames = nf; setFrames(nf); }
-    live.current.walls = live.current.walls.map((w) => (w.uid === uid ? newW : w));
-    setWalls((ws) => ws.map((w) => (w.uid === uid ? newW : w)));
+    if (L.carry) {
+      const nf = carryWithWall(L.frames, oldW, newW, 0.5, () => true);
+      if (nf !== L.frames) { L.frames = nf; setFrames(nf); }
+      const no = carryWithWall(L.objects, oldW, newW, 0.9, (o) => o.kind === 'text');
+      if (no !== L.objects) { L.objects = no; setObjects(no); }
+    }
+    L.walls = L.walls.map((w) => (w.uid === uid ? newW : w));
+    setWalls(L.walls);
+    setDirty(true);
+  };
+
+  // ---- التحديد المتعدد وتحريك مجموعة عناصر معاً ----
+  const setPrimary = (t, u) => { setSel(t === 'frame' ? u : null); setSelWall(t === 'wall' ? u : null); setSelObj(t === 'obj' ? u : null); };
+  const clearSel = () => { setSel(null); setSelWall(null); setSelObj(null); setExtra([]); };
+  const pickItem = (t, u) => {
+    const k = KC[t] + ':' + u;
+    const cur = live.current.selKeys;
+    if (cur.has(k) && cur.size > 1) setExtra([...cur].filter((x) => x !== k));
+    else setExtra([]);
+    setPrimary(t, u);
+  };
+  const toggleMulti = (h) => {
+    const k = KC[h.type] + ':' + h.uid;
+    const cur = live.current.selKeys;
+    if (!cur.size) { setPrimary(h.type, h.uid); return; }
+    if (cur.has(k)) {
+      const rest = [...cur].filter((x) => x !== k);
+      if (k === live.current.primaryKey) {
+        const nk = rest[0];
+        if (nk) { const tt = nk[0] === 'f' ? 'frame' : nk[0] === 'w' ? 'wall' : 'obj'; setPrimary(tt, nk.slice(2)); setExtra(rest.slice(1)); } else clearSel();
+      } else setExtra(rest);
+    } else setExtra([...extra, k]);
+  };
+  const carriedKeysOf = (w) => {
+    const out = [];
+    live.current.frames.forEach((f) => { if (isNearWall(f, w, 0.5)) out.push('f:' + f.uid); });
+    live.current.objects.forEach((o) => { if (isNearWall(o, w, 0.9)) out.push('o:' + o.uid); });
+    return out;
+  };
+  const moveItem = (type, uid, patch) => {
+    const L = live.current;
+    const pk = KC[type] + ':' + uid;
+    const arr = type === 'frame' ? L.frames : type === 'wall' ? L.walls : L.objects;
+    const old = arr.find((x) => x.uid === uid);
+    if (!old) return;
+    const keys = new Set(L.selKeys.has(pk) ? L.selKeys : [pk]);
+    if (keys.size === 1) {
+      if (type === 'wall') { applyWallPatch(uid, patch); return; }
+      if (type === 'frame') { L.frames = L.frames.map((f) => (f.uid === uid ? { ...f, ...patch } : f)); setFrames(L.frames); }
+      else { L.objects = L.objects.map((o) => (o.uid === uid ? { ...o, ...patch } : o)); setObjects(L.objects); }
+      setDirty(true);
+      return;
+    }
+    const dx = (patch.x ?? old.x) - old.x, dy = (patch.y ?? old.y) - old.y, dz = (patch.z ?? old.z) - old.z;
+    const M = new Set(keys);
+    if (L.carry) keys.forEach((k) => { if (k[0] === 'w') { const w = L.walls.find((x) => x.uid === k.slice(2)); if (w) carriedKeysOf(w).forEach((ck) => M.add(ck)); } });
+    const mv = (list, c, floorKeep) => list.map((it) => {
+      const k = c + ':' + it.uid;
+      if (!M.has(k)) return it;
+      if (k === pk) return { ...it, ...patch };
+      return { ...it, x: r3(it.x + dx), z: r3(it.z + dz), y: floorKeep && floorKeep(it) ? it.y : r3(it.y + dy) };
+    });
+    L.frames = mv(L.frames, 'f'); L.walls = mv(L.walls, 'w'); L.objects = mv(L.objects, 'o', (o) => o.kind !== 'text');
+    setFrames(L.frames); setWalls(L.walls); setObjects(L.objects);
+    setDirty(true);
+  };
+
+  const updateObj = (uid, patch, key) => {
+    pushUndo(key || ('ob:' + uid + ':' + Object.keys(patch).join(',')));
+    setObjects((os) => os.map((o) => (o.uid === uid ? { ...o, ...patch } : o)));
+    setDirty(true);
+  };
+  const addObject = (kind) => {
+    if (live.current.objects.length >= MAX_OBJECTS) { showToast('وصلت للحد الأقصى من المجسمات', 'warn'); return; }
+    if (!engineRef.current) return;
+    pushUndo();
+    let o;
+    if (kind === 'text') {
+      const p = engineRef.current.frontPlacement();
+      o = { uid: newObjUid(), kind, x: r3(p.x + Math.sin(p.r) * 0.18), y: r3(Math.max(1.4, p.y + 0.9)), z: r3(p.z + Math.cos(p.r) * 0.18), r: p.r, s: 1, text: 'مرحباً بكم في المعرض', color: '#c9a35b' };
+    } else {
+      const g = engineRef.current.frontGround();
+      o = { uid: newObjUid(), kind, x: g.x, y: 0, z: g.z, r: g.r, s: 1 };
+    }
+    setObjects((os) => [...os, o]);
+    setExtra([]); setPrimary('obj', o.uid);
+    setDirty(true);
+    showToast('أُضيف: ' + OBJECT_KINDS[kind]);
+  };
+  const duplicateObj = () => {
+    if (!selObjObj) return;
+    if (live.current.objects.length >= MAX_OBJECTS) { showToast('وصلت للحد الأقصى من المجسمات', 'warn'); return; }
+    pushUndo();
+    const o = { ...selObjObj, uid: newObjUid(), x: r3(selObjObj.x + 0.8), z: r3(selObjObj.z + 0.8) };
+    setObjects((os) => [...os, o]);
+    setExtra([]); setPrimary('obj', o.uid);
+    setDirty(true);
+  };
+  const deleteObj = () => {
+    if (!selObjObj) return;
+    pushUndo();
+    setObjects((os) => os.filter((o) => o.uid !== selObjObj.uid));
+    setSelObj(null);
+    setDirty(true);
+  };
+  const deleteSelectedMany = () => {
+    const keys = live.current.selKeys;
+    if (!keys.size) return;
+    if (!window.confirm('حذف العناصر المحددة (' + keys.size + ')؟')) return;
+    pushUndo();
+    const delF = new Set(), delW = new Set(), delO = new Set();
+    keys.forEach((k) => { const u = k.slice(2); if (k[0] === 'f') delF.add(u); else if (k[0] === 'w') delW.add(u); else delO.add(u); });
+    if (delF.size === live.current.frames.length) { showToast('لا يمكن حذف كل الإطارات', 'warn'); return; }
+    setFrames((fs) => fs.filter((f) => !delF.has(f.uid)));
+    setPhotoOf((m) => { const c = { ...m }; delF.forEach((u) => delete c[u]); return c; });
+    setWalls((ws) => ws.filter((w) => !delW.has(w.uid)));
+    setObjects((os) => os.filter((o) => !delO.has(o.uid)));
+    clearSel();
     setDirty(true);
   };
 
@@ -813,7 +1011,7 @@ export default function GalleryEditor() {
     const newW = { uid: newUid('w'), width: 6, height: 3.5, depth: 0.3, x: 0, y: 1.75, z: 0, r: 0 };
     setWalls((ws) => [...ws, newW]);
     setSelWall(newW.uid);
-    setSel(null);
+    setSel(null); setSelObj(null); setExtra([]);
     setDirty(true);
     showToast('تمت إضافة جدار جديد');
   };
@@ -841,7 +1039,7 @@ export default function GalleryEditor() {
     const f = { uid: newUid('f'), n: nextFreeN(), x: 0, y: 1.6, z: 0, r: 0, s: 1, ...place, ...(extra || {}) };
     setFrames((fs) => [...fs, f].sort((a, b) => a.n - b.n));
     setSel(f.uid);
-    setSelWall(null);
+    setSelWall(null); setSelObj(null); setExtra([]);
     setDirty(true);
     showToast('أُضيف الإطار رقم ' + f.n);
   };
@@ -884,13 +1082,11 @@ export default function GalleryEditor() {
     showToast('أُلصق الإطار بأقرب جدار');
   };
   const focusFrame = (f) => {
-    setSel(f.uid);
-    setSelWall(null);
+    setPrimary('frame', f.uid); setExtra([]);
     if (engineRef.current) engineRef.current.focusFrame(f);
   };
   const focusWall = (w) => {
-    setSelWall(w.uid);
-    setSel(null);
+    setPrimary('wall', w.uid); setExtra([]);
     if (engineRef.current) engineRef.current.focusWall(w);
   };
   const applyN = (txt) => {
@@ -916,6 +1112,7 @@ export default function GalleryEditor() {
     setSaving(true);
     try {
       const payloadFrames = frames.map((f) => ({ o: f.origN ?? null, n: f.n, x: r3(f.x), y: r3(f.y), z: r3(f.z), r: r3(f.r), s: r3(f.s) }));
+      const payloadObjects = objects.map((o) => ({ uid: o.uid, kind: o.kind, x: r3(o.x), y: r3(o.y), z: r3(o.z), r: r3(o.r || 0), s: r3(o.s || 1), ...(o.kind === 'text' ? { text: o.text, color: o.color } : {}) }));
       const payloadWalls = walls.map((w) => ({ uid: w.uid, width: r3(w.width), height: r3(w.height), depth: r3(w.depth), x: r3(w.x), y: r3(w.y), z: r3(w.z), r: r3(w.r || 0) }));
       
       const uidByPhoto = {};
@@ -929,14 +1126,15 @@ export default function GalleryEditor() {
       const res = await fetch('/api/layout', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ frames: payloadFrames, walls: payloadWalls, photoSlots })
+        body: JSON.stringify({ frames: payloadFrames, walls: payloadWalls, objects: payloadObjects, photoSlots })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showToast(data.error || 'فشل الحفظ', 'err'); setSaving(false); return; }
       setDirty(false);
       setIsDefault(false);
       setFrames((fs) => fs.map((f) => ({ ...f, origN: f.n })));
-      showToast('تم حفظ التخطيط والجدران بنجاح');
+      if (data.objectsSaved === false) showToast('حُفظ التخطيط، لكن المجسمات لم تُحفظ — نفّذ ملف supabase_update_v11.sql أولاً', 'warn');
+      else showToast('تم حفظ التخطيط والجدران والمجسمات بنجاح');
     } catch (e) {
       showToast('تعذّر الاتصال بالخادم', 'err');
     }
@@ -955,16 +1153,20 @@ export default function GalleryEditor() {
     listFrames.forEach((f) => { const p = byFrame.get(f.n); if (p) po[f.uid] = String(p.id); });
     setFrames(listFrames);
     setWalls(listWalls);
+    setObjects(buildDefaultObjects(listWalls));
     setPhotoOf(po);
-    setSel(null);
-    setSelWall(null);
+    clearSel();
     setDirty(true);
   };
 
   cbRef.current = {
     beginGesture: () => pushUndo(),
-    moveFrame: (uid, p) => { setFrames((fs) => fs.map((f) => (f.uid === uid ? { ...f, ...p } : f))); setDirty(true); },
-    moveWall: (uid, p) => applyWallPatch(uid, p)
+    moveFrame: (uid, p) => moveItem('frame', uid, p),
+    moveWall: (uid, p) => moveItem('wall', uid, p),
+    moveObj: (uid, p) => moveItem('obj', uid, p),
+    pick: pickItem,
+    toggleMulti,
+    clear: clearSel
   };
 
   useEffect(() => {
@@ -975,6 +1177,12 @@ export default function GalleryEditor() {
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') { e.preventDefault(); redo(); return; }
       if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
       
+      if (e.code === 'Delete' && live.current.selKeys.size > 1) { deleteSelectedMany(); return; }
+      if (e.code === 'Escape') { clearSel(); return; }
+      if (selObjObj) {
+        if (e.code === 'Delete') deleteObj();
+        return;
+      }
       if (selFrame) {
         const stepMove = e.shiftKey ? 0.25 : 0.05;
         if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
@@ -1042,6 +1250,16 @@ export default function GalleryEditor() {
         {isDefault && <div className="note">التخطيط الحالي افتراضي ولم يُحفظ بعد في قاعدة البيانات.</div>}
 
         <section>
+          <label className="check"><input type="checkbox" checked={carry} onChange={(e) => setCarry(e.target.checked)} /> تحريك الجدار مع لوحاته ومجسماته</label>
+          <div className="row" style={{ marginTop: 0 }}>
+            <button className={'btn' + (multiMode ? ' on' : '')} onClick={() => setMultiMode((v) => !v)}>☑ تحديد متعدد{multiMode ? ' (مفعّل)' : ''}</button>
+            {selKeys.size > 1 && <button className="btn" onClick={clearSel}>إلغاء ({selKeys.size})</button>}
+            {selKeys.size > 1 && <button className="btn danger" onClick={deleteSelectedMany}>حذف المحدد</button>}
+          </div>
+          <p className="hint">Ctrl + نقر على عناصر متعددة (جدران / لوحات / مجسمات) لتحديدها وتحريكها معاً. وعلى الهاتف فعّل «تحديد متعدد» ثم المس العناصر.</p>
+        </section>
+
+        <section>
           <h3>الجدران <small>(اضغط لتعديل الجدار)</small></h3>
           <div className="chips">
             {walls.map((w, idx) => (
@@ -1069,6 +1287,56 @@ export default function GalleryEditor() {
           <h3>إضافة إطار</h3>
           <button className="btn wide" onClick={addAtCamera}>+ إطار جديد حيث أنظر</button>
         </section>
+
+        <section>
+          <h3>المجسمات والنصوص <small>({objects.length})</small></h3>
+          <div className="chips">
+            {objects.map((o, i) => (
+              <button key={o.uid} className={'chip' + (selKeys.has('o:' + o.uid) ? ' on' : '')} onClick={() => { setPrimary('obj', o.uid); setExtra([]); if (engineRef.current) engineRef.current.focusObject(o); }} title={OBJECT_KINDS[o.kind]}>
+                {o.kind === 'text' ? 'نص' : o.kind === 'plant' ? '🌿' : '🏺'}{i + 1}
+              </button>
+            ))}
+          </div>
+          <div className="row">
+            <button className="btn" onClick={() => addObject('vase')}>+ مزهرية</button>
+            <button className="btn" onClick={() => addObject('plant')}>+ نبتة</button>
+            <button className="btn" onClick={() => addObject('text')}>+ نص عربي</button>
+          </div>
+        </section>
+
+        {selObjObj ? (
+          <section className="sel">
+            <h3>{OBJECT_KINDS[selObjObj.kind]} <span className="selnum">محدد</span></h3>
+            {selObjObj.kind === 'text' && (
+              <>
+                <label className="nf">
+                  <span>النص (عربي)</span>
+                  <div className="nfbox"><input dir="rtl" maxLength={80} value={selObjObj.text || ''} onChange={(e) => updateObj(selObjObj.uid, { text: e.target.value }, 'txt:' + selObjObj.uid)} /></div>
+                </label>
+                <label className="nf">
+                  <span>اللون</span>
+                  <input type="color" value={selObjObj.color || '#c9a35b'} onChange={(e) => updateObj(selObjObj.uid, { color: e.target.value }, 'col:' + selObjObj.uid)} style={{ height: '36px', padding: '2px' }} />
+                </label>
+              </>
+            )}
+            <div className="grid3">
+              <NumField label="X" value={selObjObj.x} onChange={(v) => updateObj(selObjObj.uid, { x: r3(clamp(v, -60, 60)) }, 'ox')} />
+              <NumField label="الارتفاع Y" value={selObjObj.y} onChange={(v) => updateObj(selObjObj.uid, { y: r3(clamp(v, 0, 30)) }, 'oy')} />
+              <NumField label="Z" value={selObjObj.z} onChange={(v) => updateObj(selObjObj.uid, { z: r3(clamp(v, -60, 60)) }, 'oz')} />
+            </div>
+            <div className="grid2">
+              <NumField label="الدوران" suffix="°" digits={1} step={5} value={(((selObjObj.r || 0) * RAD2DEG) % 360 + 360) % 360} onChange={(v) => updateObj(selObjObj.uid, { r: r3((v * Math.PI) / 180) }, 'orot')} />
+              <NumField label="الحجم ×" digits={2} step={0.1} value={selObjObj.s} onChange={(v) => updateObj(selObjObj.uid, { s: r3(clamp(v, 0.2, 8)) }, 'oscale')} />
+            </div>
+            <input className="range" type="range" min="0.2" max="4" step="0.05" value={Math.min(4, selObjObj.s)} onChange={(e) => updateObj(selObjObj.uid, { s: r3(parseFloat(e.target.value)) }, 'oscale')} />
+            <div className="row">
+              <button className="btn" onClick={() => updateObj(selObjObj.uid, { r: r3((selObjObj.r || 0) - Math.PI / 2) })}>↺ 90°</button>
+              <button className="btn" onClick={() => updateObj(selObjObj.uid, { r: r3((selObjObj.r || 0) + Math.PI / 2) })}>↻ 90°</button>
+              <button className="btn" onClick={duplicateObj}>نسخ</button>
+              <button className="btn danger" onClick={deleteObj}>حذف</button>
+            </div>
+          </section>
+        ) : null}
 
         {selWallObj ? (
           <section className="sel">
@@ -1150,9 +1418,9 @@ export default function GalleryEditor() {
               <button className="btn danger" onClick={deleteSel}>حذف الإطار</button>
             </div>
           </section>
-        ) : !selWallObj ? (
+        ) : !selWallObj && !selObjObj ? (
           <section>
-            <p className="hint">اضغط على أي جدار أو إطار في الصالة لتحديده وتعديله أو سحبه مباشرة بالماوس.</p>
+            <p className="hint">اضغط على أي جدار أو إطار أو مجسم في الصالة لتحديده وتعديله أو سحبه مباشرة بالماوس.</p>
           </section>
         ) : null}
 
@@ -1186,6 +1454,7 @@ export default function GalleryEditor() {
             <ul>
               <li><kbd>W A S D</kbd> تحرّك · <kbd>E</kbd>/<kbd>Space</kbd> أعلى · <kbd>Q</kbd>/<kbd>C</kbd> أسفل</li>
               <li>انقر بالزر الأيسر على أي **جدار** أو **إطار** لتحديده وتحريكه أو تعديل أبعاده من القائمة الجانبية.</li>
+              <li><kbd>Ctrl</kbd> + نقر: تحديد عدة عناصر وتحريكها معاً · خيار «تحريك الجدار مع محتوياته» يتحكم بنقل اللوحات والمجسمات مع الجدار.</li>
               <li><kbd>Ctrl+S</kbd> للحفظ · <kbd>Ctrl+Z</kbd> للتراجع.</li>
             </ul>
           </div>
@@ -1230,6 +1499,7 @@ const CSS = `
   .hint { font-size:12px; color:var(--mut); line-height:1.7; margin:8px 0 0; }
   .btn { background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.15); color:var(--txt); padding:8px 13px; border-radius:8px; cursor:pointer; font-size:12.5px; text-decoration:none; font-family:inherit; white-space:nowrap; }
   .btn:hover { background:rgba(255,255,255,.13); }
+  .btn.on { background:var(--gold); color:#1a1408; border-color:var(--gold); }
   .btn.wide { width:100%; box-sizing:border-box; }
   .btn.ghost { background:rgba(0,0,0,.35); }
   .btn.danger { color:#f0a0a0; border-color:rgba(224,100,100,.45); background:rgba(224,100,100,.12); }

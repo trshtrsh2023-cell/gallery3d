@@ -117,6 +117,11 @@ export default function AdminDashboard() {
   const [lSearch, setLSearch] = useState('');
   const [lPage, setLPage] = useState(1);
   const [lOpen, setLOpen] = useState(null);
+  // إدارة الدردشة
+  const [chatRows, setChatRows] = useState([]);
+  const [chatMissing, setChatMissing] = useState(false);
+  const [chatEdit, setChatEdit] = useState(null); // { id, text }
+  const [chatQ, setChatQ] = useState('');
 
   // الإداريون
   const [adminForm, setAdminForm] = useState({ username: '', password: '' });
@@ -129,6 +134,16 @@ export default function AdminDashboard() {
 
   const loadPhotos = useCallback(() => fetch('/api/admin/photos').then((r) => r.json()).then((d) => { setPhotos(Array.isArray(d) ? d : []); setLoaded((l) => ({ ...l, photos: true })); }).catch(() => {}), []);
   const loadVisits = useCallback(() => fetch('/api/visits').then((r) => r.json()).then((d) => { setVisits(Array.isArray(d) ? d : []); setLoaded((l) => ({ ...l, visits: true })); }).catch(() => {}), []);
+  const loadChat = useCallback(() => fetch('/api/admin/chat', { cache: 'no-store' }).then((r) => r.json()).then((d) => { setChatRows(Array.isArray(d.rows) ? d.rows : []); setChatMissing(!!d.missing); }).catch(() => {}), []);
+  const chatCall = async (method, body, okMsg) => {
+    try {
+      const r = await fetch('/api/admin/chat', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(d.error || 'تعذّر تنفيذ العملية'); return false; }
+      await loadChat(); loadLogs();
+      return true;
+    } catch (e) { alert('تعذّر الاتصال'); return false; }
+  };
   const loadLogs = useCallback(() => fetch('/api/admin/logs').then((r) => r.json()).then((d) => { setLogs(Array.isArray(d.rows) ? d.rows : []); setLogsMissing(!!d.missing); }).catch(() => {}), []);
   const loadAdmins = useCallback(() => fetch('/api/admin/admins').then((r) => r.json()).then((d) => setAdmins(Array.isArray(d) ? d : [])).catch(() => {}), []);
   const loadPresence = useCallback(() => fetch('/api/presence').then((r) => r.json()).then((d) => setPresence({ count: d.count || 0, names: Array.isArray(d.names) ? d.names : [] })).catch(() => {}), []);
@@ -328,9 +343,10 @@ export default function AdminDashboard() {
     { id: 'photos', label: 'اللوحات', icon: 'image', badge: photos.length },
     { id: 'visits', label: 'الزوار والأجهزة', icon: 'users', badge: visits.length },
     { id: 'logs', label: 'سجل النشاط', icon: 'list', badge: logs.length },
+    { id: 'chat', label: 'سجل الدردشة', icon: 'list', badge: chatRows.length },
     { id: 'admins', label: 'الإداريون', icon: 'shield' }
   ];
-  const titles = { overview: 'نظرة عامة', photos: 'إدارة اللوحات', visits: 'الزوار والأجهزة', logs: 'سجل نشاط الإداريين', admins: 'الإداريون' };
+  const titles = { overview: 'نظرة عامة', photos: 'إدارة اللوحات', visits: 'الزوار والأجهزة', logs: 'سجل نشاط الإداريين', chat: 'سجل الدردشة', admins: 'الإداريون' };
 
   return (
     <div className="d-app" dir="rtl">
@@ -348,7 +364,7 @@ export default function AdminDashboard() {
         </div>
         <nav>
           {NAV.map((n) => (
-            <button key={n.id} className={'d-nav' + (tab === n.id ? ' on' : '')} onClick={() => { setTab(n.id); setNavOpen(false); if (n.id === 'logs') loadLogs(); }}>
+            <button key={n.id} className={'d-nav' + (tab === n.id ? ' on' : '')} onClick={() => { setTab(n.id); setNavOpen(false); if (n.id === 'logs') loadLogs(); if (n.id === 'chat') loadChat(); }}>
               <Icon name={n.icon} /> <span>{n.label}</span>
               {n.badge !== undefined && <em>{n.badge}</em>}
             </button>
@@ -646,6 +662,52 @@ export default function AdminDashboard() {
                 </div>
               </section>
               <p className="d-note">يُسجَّل تلقائياً: الدخول والخروج ومحاولات الدخول الفاشلة، رفع اللوحات وتعديلها وحذفها وإعادة ترتيبها، كل عملية حفظ في محرر المعرض بتفاصيلها (إطارات وجدران وتوزيع اللوحات)، وإضافة/حذف الإداريين.</p>
+            </>
+          )}
+
+          {tab === 'chat' && (
+            <>
+              {chatMissing && <div className="d-note warnbox">جدول الدردشة غير موجود بعد — نفّذ ملف <b>supabase_update_v11.sql</b> في Supabase SQL Editor.</div>}
+              <div className="d-toolbar">
+                <label className="d-search"><Icon name="search" size={16} /><input placeholder="بحث في الاسم أو الرسالة…" value={chatQ} onChange={(e) => setChatQ(e.target.value)} /></label>
+                <button className="d-btn" onClick={loadChat}>تحديث</button>
+                <button className="d-btn" disabled={!chatRows.length} onClick={() => { if (confirm('مسح كل رسائل الدردشة الحالية؟')) chatCall('DELETE', { all: true }); }}>مسح الكل</button>
+              </div>
+              <section className="d-panel flush">
+                <div className="d-tablewrap">
+                  <table className="d-table logs">
+                    <thead><tr><th>الوقت</th><th>الاسم</th><th>الرسالة</th><th>إجراء</th></tr></thead>
+                    <tbody>
+                      {chatRows.filter((m) => !chatQ.trim() || (m.name + ' ' + m.message).includes(chatQ.trim())).map((m) => (
+                        <tr key={m.id}>
+                          <td>{fmtDateTime(m.created_at)}</td>
+                          <td><b>{m.name}</b></td>
+                          <td style={{ maxWidth: 420, wordBreak: 'break-word' }}>
+                            {chatEdit && chatEdit.id === m.id ? (
+                              <input style={{ width: '100%' }} maxLength={280} value={chatEdit.text} onChange={(e) => setChatEdit({ id: m.id, text: e.target.value })} autoFocus />
+                            ) : m.message}
+                          </td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            {chatEdit && chatEdit.id === m.id ? (
+                              <>
+                                <button className="d-link" onClick={async () => { if (await chatCall('PUT', { id: m.id, message: chatEdit.text })) setChatEdit(null); }}>حفظ</button>{' · '}
+                                <button className="d-link" onClick={() => setChatEdit(null)}>إلغاء</button>
+                              </>
+                            ) : (
+                              <>
+                                <button className="d-link" onClick={() => setChatEdit({ id: m.id, text: m.message })}>تعديل</button>{' · '}
+                                <button className="d-link" onClick={() => { if (confirm('حذف هذه الرسالة؟')) chatCall('DELETE', { id: m.id }); }}>حذف</button>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {chatRows.length === 0 && <p className="d-empty pad">لا توجد رسائل حالياً (تُحذف تلقائياً بعد 15 ساعة).</p>}
+                </div>
+              </section>
+              <p className="d-note">كل تعديل أو حذف يُسجَّل في «سجل النشاط» باسم الإداري.</p>
             </>
           )}
 
